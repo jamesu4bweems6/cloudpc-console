@@ -1,0 +1,17 @@
+# Only these runtime sources may enter the build context.
+**
+!Dockerfile
+!requirements.txt
+!cloudpc_protocol.py
+!connect_once.py
+!zte_connection.py
+!zte_gateway_probe.py
+!live_validate.py
+!keepalive_loop.py
+!sample-profile.json
+!zte-sample-profile.json
+!web
+!web/server.py
+!web/index.html
+!web/app.js
+!web/style.css

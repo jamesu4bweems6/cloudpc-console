@@ -1,0 +1,17 @@
+*.local.json
+*.local.json.tmp
+__pycache__/
+audit/
+live/
+.env
+docker-data/
+sample-profile.json
+zte-sample-profile.json
+*.local.*
+.venv/
+venv/
+*.ipa
+*.bin
+*.pcap
+*.pcapng
+*.log

@@ -1,0 +1,2 @@
+-r requirements.txt
+pycryptodome>=3.20,<4
