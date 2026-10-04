@@ -25,6 +25,9 @@ class WebChecks(unittest.TestCase):
         self.console.settings({'password':'','intervalHours':6,'holdSeconds':20})
         self.assertEqual(w.p.load_json(self.root/'account.local.json')['auth']['password'],'PASSWORD_PRIVATE')
         with self.assertRaises(ValueError):self.console.settings({'intervalHours':0})
+        self.console.settings({'intervalHours':24})
+        self.assertEqual(self.console.state()['intervalHours'],24)
+        with self.assertRaises(ValueError):self.console.settings({'intervalHours':25})
         with self.assertRaises(ValueError):self.console.settings({'targetId':'someone-else'})
 
     def test_busy_and_loop_exclude_auth_mutation(self):

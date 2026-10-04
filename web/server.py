@@ -43,7 +43,7 @@ class Console:
         self.settings_file=self.data_dir/'live/web-settings.local.json'
         if self.settings_file.exists():
             settings=p.load_json(self.settings_file)
-            self.interval=max(1,min(12,int(settings.get('intervalHours',12))))
+            self.interval=max(1,min(24,int(settings.get('intervalHours',12))))
             self.hold=max(5,min(60,int(settings.get('holdSeconds',15))))
         self.machines=[];self.load_cache()
         self.event('控制台已就绪，周期连接未启动。')
@@ -89,7 +89,7 @@ class Console:
 
     def settings(self,data):
         interval=int(data.get('intervalHours',self.interval));hold=int(data.get('holdSeconds',self.hold))
-        if not 1<=interval<=12 or not 5<=hold<=60:raise ValueError('连接间隔或保持时间超出范围')
+        if not 1<=interval<=24 or not 5<=hold<=60:raise ValueError('连接间隔或保持时间超出范围')
         with self.lock:
             if self.busy or self.loop:raise ValueError('请等待当前操作完成并停止周期连接后修改设置')
             cfg=p.load_json(self.config_file)

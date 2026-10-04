@@ -26,7 +26,7 @@
       <button id="connect" class="button primary full"><span>↗</span>立即连接一次</button><p class="help center">完成认证、保持连接后自动断开并清理状态。</p>
     </section>
     <section class="card schedule-card"><div class="card-heading"><h3>周期连接</h3><span id="schedule-tag" class="tag">已停止</span></div><p class="card-description">按设定间隔连接一次云电脑，执行结果会记录在下方。</p>
-      <div class="schedule-config"><div><label for="interval" class="field-label">连接间隔</label><div class="unit-input"><input id="interval" type="number" min="1" max="12" value="12"><span>小时</span></div></div><div><label for="hold" class="field-label">单次保持</label><div class="unit-input"><input id="hold" type="number" min="5" max="60" value="15"><span>秒</span></div></div></div>
+      <div class="schedule-config"><div><label for="interval" class="field-label">连接间隔</label><div class="unit-input"><input id="interval" type="number" min="1" max="24" value="12"><span>小时</span></div></div><div><label for="hold" class="field-label">单次保持</label><div class="unit-input"><input id="hold" type="number" min="5" max="60" value="15"><span>秒</span></div></div></div>
       <div class="flow"><div><b>1</b><span>认证</span></div><i>—</i><div><b>2</b><span>连接</span></div><i>—</i><div><b>3</b><span>保持</span></div><i>—</i><div><b>4</b><span>断开</span></div></div>
       <div class="schedule-note"><span>◷</span><p id="schedule-note">启动后立即连接一次；后续按间隔运行。遇到失败会停止，避免持续重复请求。</p></div>
       <div class="button-row"><button id="save-settings" class="button secondary">保存设置</button><button id="loop" class="button primary grow">▷ 开启周期连接</button></div><p class="help">停止周期运行后，已开始的连接会正常结束。关闭本地服务会终止周期运行。</p>

@@ -11,7 +11,7 @@ def main():
     ap=argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--session',type=pathlib.Path,default=p.DATA_DIR/'session.local.json')
     ap.add_argument('--config',type=pathlib.Path,default=p.DATA_DIR/'account.local.json')
-    ap.add_argument('--interval-hours',type=int,default=12,choices=range(1,13))
+    ap.add_argument('--interval-hours',type=int,default=12,choices=range(1,25))
     args=ap.parse_args()
     while True:
         result=subprocess.run([sys.executable,'-X','utf8',str(here/'connect_once.py'),

@@ -15,13 +15,13 @@ class ContainerRuntimeChecks(unittest.TestCase):
 
     def test_first_start_and_restart_preserve_identity_and_settings(self):
         first=w.p.load_json(self.console.config_file)
-        self.console.settings({'mobile':'13812345678','password':'PRIVATE','intervalHours':6})
+        self.console.settings({'mobile':'13812345678','password':'PRIVATE','intervalHours':24})
         session=self.data/'live/web-session.local.json'
         w.p.save_json(session,{'accessTicket':'PRIVATE_TICKET'})
         restarted=w.Console(start_scheduler=False)
         try:
             self.assertEqual(w.p.load_json(restarted.config_file)['common']['deviceUid'],first['common']['deviceUid'])
-            self.assertEqual(restarted.interval,6);self.assertEqual(restarted.session_file,session)
+            self.assertEqual(restarted.interval,24);self.assertEqual(restarted.session_file,session)
             self.assertTrue(restarted.state()['sessionAvailable']);self.assertFalse(restarted.loop)
             self.assertEqual(restarted.history(),[])
         finally:restarted.close()
