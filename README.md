@@ -19,19 +19,19 @@
 
 ## 协议配置
 
-公开仓库只提供配置模板，**不包含提取的私钥、签名密钥、AES 密钥、个人账号或登录票据**。联网登录和桌面连接前，需要准备与所分析客户端版本匹配的协议参数。
+仓库包含从移动云电脑 iOS 3.6.6 样本提取的静态协议参数，包括客户端通用的签名密钥、RSA 公私钥和 ZTE AES 密钥。它们用于复现客户端协议，不是个人账号或登录票据，也不能替代正常登录。个人账号、登录会话及含这些数据的运行日志不上传。
 
-| 本地文件 | 内容 | 模板 |
+| 文件 | 内容 | 来源 |
 | --- | --- | --- |
-| `sample-profile.json` | CEM 服务地址、AccessKey、签名密钥、RSA 公私钥 | `sample-profile.example.json` |
-| `zte-sample-profile.json` | ZTE AES-128 参数密钥及语言 | `zte-sample-profile.example.json` |
+| `sample-profile.json` | CEM 服务地址、AccessKey、签名密钥、RSA 公私钥 | 仓库已提供；格式参考 `sample-profile.example.json` |
+| `zte-sample-profile.json` | ZTE AES-128 参数密钥及语言 | 仓库已提供；格式参考 `zte-sample-profile.example.json` |
 | `account.local.json` | 本人账号、稳定设备身份和目标云电脑 | 首次启动自动生成，或运行 `python cloudpc_protocol.py init` |
 | `live/zte-cag-pin.local.json` | 本人 CAG 的精确请求地址和已核对证书 SHA-256 | 由已有验证环境提供 |
 | `live/zte-ice-pin.local.json` | 本人 ICE 网关的已核对证书固定信息 | 由已有验证环境提供 |
 
-已有验证环境可直接在本地保留两个协议配置文件。首次准备时，复制两个模板为对应文件名，并填写从自己有权分析的客户端取得的参数。模板中的空字符串不能完成线上认证；随意生成的新密钥也不能替代服务端要求的参数。RSA PEM 使用 JSON 字符串中的 `\n` 表示换行。
+克隆仓库后可直接使用提供的两个协议配置文件。模板只用于说明格式，空字符串不能完成线上认证；其他客户端版本需要核对参数，随意生成的新密钥也不能替代服务端要求的参数。RSA PEM 使用 JSON 字符串中的 `\n` 表示换行。
 
-两个协议配置文件已被 Git 忽略，但本地 Docker 构建会读取它们并写入镜像。因此构建好的镜像也应留在自己的部署环境中。个人账号、会话、证书固定文件和日志不会进入 Docker 构建上下文。
+Docker 构建会读取仓库内的两个协议配置文件并写入镜像。个人账号、会话、证书固定文件和日志不会进入 Docker 构建上下文。
 
 `deviceUid` 与登录会话绑定，迁移时一起保留。网关或证书改变后，需要重新核对本人服务返回的信息，不能关闭证书固定验证来跳过检查。
 
@@ -57,7 +57,7 @@ python -m venv .venv
 source .venv/bin/activate
 ```
 
-准备好上述协议配置后运行：
+安装依赖并启动：
 
 ```sh
 python -m pip install -r requirements.txt
@@ -75,7 +75,7 @@ python -X utf8 web/server.py
 
 ## Docker 启动
 
-使用 Docker Compose v2 和 Linux 容器。先准备根目录的两个本地协议配置，再执行：
+使用 Docker Compose v2 和 Linux 容器。仓库已附带该样本的两组协议参数，执行：
 
 ```sh
 docker compose up -d --build
@@ -163,6 +163,23 @@ python -X utf8 -m unittest discover -s web -p "test_*.py" -v
 
 覆盖签名及RSA独立实现对照、密码/短信/挑战流程、票据刷新、上报清理、ZTE帧布局、分片读取、敏感字段过滤、并发互斥、Host/Origin/CSRF、数据迁移、首次启动及关闭处理。
 
+## 辅助脚本
+
+`export_profile.py` 可从自己分析得到的 Blutter 对象池重新导出 CEM 参数，默认偏移来自本项目的 3.6.6 样本。对象池文件需要自己提供：
+
+```sh
+python export_profile.py --pool /path/to/blutter/pp.txt --output sample-profile.json
+```
+
+`inspect_zte_tls.py` 查看本人设备列表中选定目标的 CAG TLS 证书并保存固定值，不发送账号或桌面认证请求：
+
+```sh
+python inspect_zte_tls.py --help
+python inspect_zte_tls.py --devices devices.local.json --machine-id YOUR_MACHINE_ID
+```
+
+脚本会先尝试正常CA验证，再观察证书。保存观察值不代表已确认网关身份，使用前应与本人服务返回的信息核对。ICE证书固定信息仍需由自己的验证环境提供。
+
 ## 文件结构
 
 ```text
@@ -175,5 +192,9 @@ live_validate.py           本地协议审计支持
 web/                       网页资源、后端与离线检查
 Dockerfile / compose.yaml  容器部署定义
 docker_import.py           本地账号、会话及证书迁移
+export_profile.py          从Blutter对象池导出CEM静态参数
+inspect_zte_tls.py          查看本人目标CAG证书并保存固定值
+sample-profile.json        样本CEM静态协议参数
+zte-sample-profile.json     样本ZTE静态协议参数
 *.example.json             不含密钥的协议配置模板
 ```

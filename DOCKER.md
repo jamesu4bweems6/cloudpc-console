@@ -1,7 +1,7 @@
 # Docker 网页控制台
 
 使用 Docker Compose v2 和 Linux 容器。Windows 的 Docker Desktop 选择 Linux containers。
-进入克隆后的仓库根目录（包含 `compose.yaml`），并准备好 README 所述的两个本地协议配置：
+进入克隆后的仓库根目录（包含 `compose.yaml`）。仓库已附带 3.6.6 样本的两组静态协议参数：
 
 ```powershell
 cd cloudpc-console

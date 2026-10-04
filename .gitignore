@@ -5,8 +5,6 @@ audit/
 live/
 .env
 docker-data/
-sample-profile.json
-zte-sample-profile.json
 *.local.*
 .venv/
 venv/
