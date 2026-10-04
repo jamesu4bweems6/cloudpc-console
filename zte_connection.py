@@ -101,10 +101,14 @@ def fetch_parameters(machine,directory):
         pin_file=p.DATA_DIR/'live/zte-cag-pin.local.json'
         if pin_file.exists():
             pin=p.load_json(pin_file)
-            if pin['url']!=url:raise p.ProtocolError('本地证书固定主机与认证网关不匹配')
+            if pin['url']!=url:raise p.ConnectionError('CAG_PIN_GATEWAY_MISMATCH')
             session.mount(url,PinnedGatewayAdapter(url,pin['sha256']))
-        response=session.post(url,data=styled(body).encode('utf-8'),headers=headers,
-                              timeout=(10,20),allow_redirects=False)
+        try:
+            response=session.post(url,data=styled(body).encode('utf-8'),headers=headers,
+                                  timeout=(10,20),allow_redirects=False)
+        except requests.exceptions.SSLError as exc:
+            raise p.ConnectionError('CAG_TLS_PINNED_FAILURE' if pin_file.exists() else 'CAG_TLS_NO_PIN',
+                                    error_type=type(exc).__name__) from exc
         (directory/'response.bin').write_bytes(response.content)
         if response.status_code!=200:raise p.ProtocolError('连接参数 HTTP 失败')
         decoded=response.json();p.save_json(directory/'response.local.json',decoded)

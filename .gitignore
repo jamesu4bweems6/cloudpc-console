@@ -13,3 +13,5 @@ venv/
 *.pcap
 *.pcapng
 *.log
+*.private.*
+private-pins/

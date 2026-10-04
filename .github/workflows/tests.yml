@@ -22,3 +22,35 @@ jobs:
       - run: python -m pip install -r test-requirements.txt
       - run: python -X utf8 -m unittest test_protocol test_desktop -v
       - run: python -X utf8 -m unittest discover -s web -p 'test_*.py' -v
+
+  docker-startup:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Build and start Docker console
+        run: docker compose up -d --build
+      - name: Check local HTTP and automatic pin initialization
+        run: |
+          python - <<'PY'
+          import json, time, urllib.request
+          opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+          for attempt in range(30):
+              try:
+                  with opener.open('http://127.0.0.1:8766/healthz', timeout=2) as response:
+                      assert json.load(response) == {'ok': True}
+                  break
+              except OSError:
+                  if attempt == 29: raise
+                  time.sleep(1)
+          with opener.open('http://127.0.0.1:8766/api/state', timeout=2) as response:
+              state = json.load(response)
+          assert not state['sessionAvailable'] and not state['loopEnabled']
+          print('Docker HTTP health and fresh state: OK')
+          PY
+          docker compose exec -T cloudpc python -c "import cloudpc_protocol as p; names=('zte-cag-pin','zte-ice-pin'); assert all(p.load_json(p.DATA_DIR/'live'/(n+'.local.json'))==p.load_json(p.HERE/'gateway-pins'/(n+'.json')) for n in names); print('Both bundled pins initialized: OK')"
+      - name: Show startup logs on failure
+        if: failure()
+        run: docker compose logs --tail=100
+      - name: Stop test container
+        if: always()
+        run: docker compose down

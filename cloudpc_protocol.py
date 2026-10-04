@@ -29,6 +29,32 @@ BASE_URL = 'https://cloudpc.ecloud.10086.cn'
 class ProtocolError(Exception):
     pass
 
+CONNECTION_HINTS = {
+    'CAG_TLS_NO_PIN': 'CAG HTTPS 握手失败，未配置 CAG 证书固定文件。请导入已核对的 zte-cag-pin.local.json。',
+    'CAG_TLS_PINNED_FAILURE': '已配置 CAG 证书固定值，但 HTTPS 验证或握手失败。请核对证书是否变更及 TLS 兼容性。',
+    'CAG_PIN_GATEWAY_MISMATCH': 'CAG 证书固定文件与本次返回的网关不匹配，请核对目标及固定文件。',
+    'ICE_PIN_MISSING': '缺少 ICE 证书固定文件，请导入已核对的 zte-ice-pin.local.json。',
+    'ICE_PIN_MISMATCH': 'ICE 证书与固定值不匹配，已停止连接；请重新核对网关证书。',
+    'ICE_PIN_GATEWAY_MISMATCH': 'ICE 证书固定文件与本次返回的网关不匹配，请核对目标及固定文件。',
+}
+
+class ConnectionError(ProtocolError):
+    def __init__(self, diagnostic_code, error_type=None):
+        self.diagnostic_code = diagnostic_code
+        self.error_type = error_type or type(self).__name__
+        super().__init__(CONNECTION_HINTS[diagnostic_code])
+
+def connection_failure_message(result):
+    """Only fixed labels; never expose raw transport exception text or URLs."""
+    result = result or {}
+    hint = CONNECTION_HINTS.get(result.get('diagnosticCode'))
+    if hint:return hint
+    if result.get('errorType') == 'SSLError':
+        return ('ICE TLS 验证或握手失败，请核对 ICE 固定证书。' if result.get('gatewayAuthenticated') else
+                'CAG HTTPS 验证或握手失败，请检查 CAG 固定证书及 TLS 配置。')
+    if result.get('errorCode'):return '业务码 '+str(result['errorCode'])
+    return '请查看最近记录中的错误类型和失败阶段。'
+
 class BusinessError(ProtocolError):
     def __init__(self, code, response):
         # Keep messages/bodies local: a server error can echo credentials.
@@ -105,6 +131,23 @@ def save_json(path, value):
     temporary = path.with_name(path.name + '.tmp')
     temporary.write_text(json.dumps(value, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
     temporary.replace(path)
+
+def ensure_gateway_pins(data_dir=None):
+    """Seed bundled pins only when missing; never replace a user's existing pin."""
+    data_dir = pathlib.Path(data_dir) if data_dir is not None else DATA_DIR
+    created = []
+    for name in ('zte-cag-pin', 'zte-ice-pin'):
+        source = HERE / 'gateway-pins' / (name + '.json')
+        destination = data_dir / 'live' / (name + '.local.json')
+        if destination.exists() or not source.is_file():continue
+        value = load_json(source)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with destination.open('x', encoding='utf-8') as file:
+                file.write(json.dumps(value, ensure_ascii=False, indent=2) + '\n')
+        except FileExistsError:continue
+        created.append(name)
+    return created
 
 class Client:
     def __init__(self, profile, config, session=None, *, transport=None, audit_dir=None):

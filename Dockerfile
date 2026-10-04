@@ -13,6 +13,7 @@ RUN groupadd --gid 10001 cloudpc \
     && chown -R cloudpc:cloudpc /data
 COPY cloudpc_protocol.py connect_once.py zte_connection.py zte_gateway_probe.py live_validate.py keepalive_loop.py sample-profile.json zte-sample-profile.json ./
 COPY web/server.py web/index.html web/app.js web/style.css ./web/
+COPY gateway-pins/ ./gateway-pins/
 USER 10001:10001
 EXPOSE 8765
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \

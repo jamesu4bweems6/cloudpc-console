@@ -17,8 +17,12 @@ def mask(value):
 
 RESULT_FIELDS=('success','desktopProtocolConnected','gatewayAuthenticated','desktopChannelAuthenticated',
  'mainInitReceived','channelsListReceived','controlSessionCompleted','controlHoldSeconds',
- 'connectedReportAccepted','disconnectedReportAccepted','ticketRefreshAccepted','startedAt','finishedAt','errorCode','errorType')
-def safe_result(value):return {k:value[k] for k in RESULT_FIELDS if k in value}
+ 'connectedReportAccepted','disconnectedReportAccepted','ticketRefreshAccepted','startedAt','finishedAt','errorCode','errorType',
+ 'diagnosticCode','failedStage')
+def safe_result(value):
+    result={k:value[k] for k in RESULT_FIELDS if k in value}
+    if not value.get('success'):result['errorHint']=p.connection_failure_message(result)
+    return result
 def safe_machine(value):
     return {k:value.get(k) for k in ('machineId','machineName','machineStatus','originCompanyCode','resourceType','instanceId','resourcePoolUid')}
 
@@ -27,6 +31,7 @@ class Console:
         self.data_dir=pathlib.Path(os.environ.get('CLOUDPC_DATA_DIR',str(PROTOCOL))).resolve()
         self.data_dir.mkdir(parents=True,exist_ok=True)
         if not (self.data_dir/'account.local.json').exists():p.init_config(self.data_dir/'account.local.json')
+        p.ensure_gateway_pins(self.data_dir)
         self.stopping=False;self.job=None
         self.lock=threading.RLock();self.wake=threading.Event()
         self.csrf=secrets.token_urlsafe(32);self.busy=False;self.action='';self.events=[];self.sequence=0
@@ -201,7 +206,7 @@ class Console:
         proc.wait()
         if result:self.last_result=safe_result(result)
         if proc.returncode or not result or not result.get('success'):
-            raise p.ProtocolError('连接未完成，请查看最近记录。'+('业务码 '+str(result['errorCode']) if result and result.get('errorCode') else ''))
+            raise p.ProtocolError('连接未完成：'+p.connection_failure_message(result))
         self.event('桌面认证成功，已保持 '+str(result.get('controlHoldSeconds',self.hold))+' 秒并完成断开上报。','success')
 
     def set_loop(self,enabled):

@@ -19,19 +19,21 @@
 
 ## 协议配置
 
-仓库包含从移动云电脑 iOS 3.6.6 样本提取的静态协议参数，包括客户端通用的签名密钥、RSA 公私钥和 ZTE AES 密钥。它们用于复现客户端协议，不是个人账号或登录票据，也不能替代正常登录。个人账号、登录会话及含这些数据的运行日志不上传。
+仓库包含从移动云电脑 iOS 3.6.6 样本提取的静态协议参数，包括客户端通用的签名密钥、RSA 公私钥和 ZTE AES 密钥，以及此前验证目标的两份网关证书固定值。它们不是个人账号或登录票据，不能替代正常登录。个人账号、登录会话及含这些数据的运行日志不上传。
 
 | 文件 | 内容 | 来源 |
 | --- | --- | --- |
 | `sample-profile.json` | CEM 服务地址、AccessKey、签名密钥、RSA 公私钥 | 仓库已提供；格式参考 `sample-profile.example.json` |
 | `zte-sample-profile.json` | ZTE AES-128 参数密钥及语言 | 仓库已提供；格式参考 `zte-sample-profile.example.json` |
 | `account.local.json` | 本人账号、稳定设备身份和目标云电脑 | 首次启动自动生成，或运行 `python cloudpc_protocol.py init` |
-| `live/zte-cag-pin.local.json` | 本人 CAG 的精确请求地址和已核对证书 SHA-256 | 由已有验证环境提供 |
-| `live/zte-ice-pin.local.json` | 本人 ICE 网关的已核对证书固定信息 | 由已有验证环境提供 |
+| `live/zte-cag-pin.local.json` | CAG 的精确请求地址和已核对证书 SHA-256 | 缺失时从 `gateway-pins/zte-cag-pin.json` 自动初始化 |
+| `live/zte-ice-pin.local.json` | ICE 网关的已核对证书固定信息 | 缺失时从 `gateway-pins/zte-ice-pin.json` 自动初始化 |
 
 克隆仓库后可直接使用提供的两个协议配置文件。模板只用于说明格式，空字符串不能完成线上认证；其他客户端版本需要核对参数，随意生成的新密钥也不能替代服务端要求的参数。RSA PEM 使用 JSON 字符串中的 `\n` 表示换行。
 
-Docker 构建会读取仓库内的两个协议配置文件并写入镜像。个人账号、会话、证书固定文件和日志不会进入 Docker 构建上下文。
+Docker 构建会读取仓库内的协议配置和 `gateway-pins/` 两份默认固定值并写入镜像。网页启动和命令行单次连接会自动补齐数据目录中缺失的固定文件，不覆盖已存在的文件、账号或会话；旧数据卷缺少文件时也会补齐。`live/` 中的个人运行数据和日志不会进入构建上下文。
+
+仓库固定值只适用于此前验证的网关。目标网关或证书不同会停止连接；其他目标需使用自己独立核对的固定值，程序不会自动学习新证书来绕过校验。
 
 `deviceUid` 与登录会话绑定，迁移时一起保留。网关或证书改变后，需要重新核对本人服务返回的信息，不能关闭证书固定验证来跳过检查。
 
@@ -69,7 +71,7 @@ python -X utf8 web/server.py
 1. 保存绑定手机号；密码登录还需填写用户名和密码。账号字段留空会保留已保存的配置。
 2. 选择密码或短信登录。密码登录若触发设备验证，填写该用途的最新短信验证码。多企业账号可填写企业用户名。
 3. 刷新本人设备列表，选择唯一的 ZTE 云电脑并保存。
-4. 准备本人网关的两个证书固定文件，点击“立即连接一次”。确认结果后，可按需要开启周期连接。
+4. 同一已验证网关的证书固定文件会自动初始化，点击“立即连接一次”。如果提示网关或证书不匹配，需要核对自己目标的固定值。确认连接成功后，可按需要开启周期连接。
 
 保存了会话不表示它当前仍有效；连接前会交换新 token。票据过期时需要重新登录。验证码错误或连接失败不会自动重复登录或发送短信。
 
@@ -92,6 +94,8 @@ python -X utf8 docker_import.py --source /path/to/existing/protocol
 ```
 
 上一步成功后再执行 `docker compose up -d`。如果就在原协议目录中操作，可省略 `--source`。迁移会覆盖目标中的同名 JSON 文件，凭据通过标准输入传递，不放进命令行；文件由容器服务用户写入。
+
+如果已经在容器登录，只缺默认固定文件，更新源码并重建容器即可自动补齐。若需要导入其他已核对网关的固定值，可使用 `docker_import.py --pins-only --source /path/to/verified/protocol`，保留当前账号和会话。详细恢复步骤见 [DOCKER.md](DOCKER.md)。
 
 账号、会话、设置和新连接日志保存在命名数据卷中。`docker compose down` 保留数据；**`docker compose down -v` 删除数据卷**。完整迁移、端口设置、日志、健康检查及 `docker run` 示例见 [DOCKER.md](DOCKER.md)。
 
@@ -146,9 +150,10 @@ python cloudpc_protocol.py close-report --session live/web-session.local.json
 | 本人账号的短信/密码登录及票据交换 | 本机生产环境验证通过 |
 | ZTE CAG、ICE/TLS、REDQ 主通道 | 本机连接15秒，收到初始化、版本和通道列表，响应PING并完成清理 |
 | 网页触发真实单次连接 | 本机验证通过 |
-| 离线检查 | 38项通过，不发送真实短信或云电脑请求 |
+| 离线检查 | 44项通过，不发送真实短信或云电脑请求 |
 | Docker配置及运行时适配 | YAML、数据目录、映射端口来源校验和独立本地服务已检查 |
-| 实际Docker镜像构建与容器内连接 | 交付环境未安装Docker，尚未验证 |
+| Docker镜像构建、启动及自动初始化 | 由GitHub Actions容器检查验证，结果见仓库Actions |
+| 容器内真实云电脑连接 | 尚未验证，部署后需用本人账号确认 |
 | 连续超过原始1–2天的关机续期效果 | 尚未验证 |
 
 界面显示的桌面协议 `v1.2.260108` 与样本中的 `V1.2.260728` 尚未确认对应关系；连接返回的 `V7.24.30` 是 SPICE 服务端版本，不能代替界面版本。
@@ -165,6 +170,8 @@ python -X utf8 -m unittest discover -s web -p "test_*.py" -v
 
 覆盖签名及RSA独立实现对照、密码/短信/挑战流程、票据刷新、上报清理、ZTE帧布局、分片读取、敏感字段过滤、并发互斥、Host/Origin/CSRF、数据迁移、首次启动及关闭处理。
 
+GitHub Actions另执行Docker构建和HTTP启动检查，确认两份默认固定文件自动初始化。该检查使用空账号数据卷，不登录、不发送短信或访问云电脑。
+
 ## 辅助脚本
 
 `export_profile.py` 可从自己分析得到的 Blutter 对象池重新导出 CEM 参数，默认偏移来自本项目的 3.6.6 样本。对象池文件需要自己提供：
@@ -180,7 +187,7 @@ python inspect_zte_tls.py --help
 python inspect_zte_tls.py --devices devices.local.json --machine-id YOUR_MACHINE_ID
 ```
 
-脚本会先尝试正常CA验证，再观察证书。保存观察值不代表已确认网关身份，使用前应与本人服务返回的信息核对。ICE证书固定信息仍需由自己的验证环境提供。
+脚本会先尝试正常CA验证，再观察证书。保存观察值不代表已确认网关身份，使用前应与本人服务返回的信息核对。脚本不生成ICE固定值；不同于仓库默认网关的ICE信息仍需独立核对。
 
 ## 文件结构
 
@@ -198,5 +205,6 @@ export_profile.py          从Blutter对象池导出CEM静态参数
 inspect_zte_tls.py          查看本人目标CAG证书并保存固定值
 sample-profile.json        样本CEM静态协议参数
 zte-sample-profile.json     样本ZTE静态协议参数
+gateway-pins/              已验证网关的默认CAG及ICE证书固定值
 *.example.json             不含密钥的协议配置模板
 ```

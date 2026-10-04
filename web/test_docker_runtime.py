@@ -26,6 +26,16 @@ class ContainerRuntimeChecks(unittest.TestCase):
             self.assertEqual(restarted.history(),[])
         finally:restarted.close()
 
+    def test_console_bootstrap_pins_and_preserves_existing_override(self):
+        for name in ('zte-cag-pin','zte-ice-pin'):
+            self.assertEqual(w.p.load_json(self.data/'live'/(name+'.local.json')),
+                             w.p.load_json(w.p.HERE/'gateway-pins'/(name+'.json')))
+        override={'url':'https://192.0.2.99:443/cs/test','sha256':'f'*64}
+        w.p.save_json(self.data/'live/zte-cag-pin.local.json',override)
+        restarted=w.Console(start_scheduler=False)
+        try:self.assertEqual(w.p.load_json(self.data/'live/zte-cag-pin.local.json'),override)
+        finally:restarted.close()
+
     def test_protocol_process_reads_environment_data_directory(self):
         code="import json,cloudpc_protocol as p,live_validate as v;print(json.dumps([str(p.DATA_DIR),str(v.ROOT)]))"
         result=subprocess.run([sys.executable,'-X','utf8','-c',code],cwd=w.PROTOCOL,
@@ -145,5 +155,24 @@ class ContainerRuntimeChecks(unittest.TestCase):
                 run.reset_mock();run.return_value.stdout='running-container'
                 with contextlib.redirect_stderr(io.StringIO()),self.assertRaises(SystemExit):migration.main()
                 self.assertEqual(run.call_count,1)
+
+    def test_pins_only_import_preserves_logged_in_account_and_session(self):
+        original=w.p.load_json(self.console.config_file)
+        session=self.data/'live/web-session.local.json';w.p.save_json(session,{'accessTicket':'EXISTING_TICKET'})
+        with tempfile.TemporaryDirectory() as temp:
+            source=pathlib.Path(temp)
+            w.p.save_json(source/'account.local.json',{'auth':{'password':'MUST_NOT_IMPORT'}})
+            w.p.save_json(source/'live/zte-cag-pin.local.json',{'url':'https://192.0.2.1:443/cs/test','sha256':'a'*64})
+            w.p.save_json(source/'live/zte-ice-pin.local.json',{'gateway':'192.0.2.1:443','sha256':'b'*64})
+            args=['docker_import.py','--pins-only','--source',str(source)]
+            with patch.object(sys,'argv',args),patch.object(migration.shutil,'which',return_value='docker'),patch.object(migration.subprocess,'run') as run:
+                run.return_value.stdout=''
+                with contextlib.redirect_stdout(io.StringIO()):migration.main()
+                payload=run.call_args_list[-1].kwargs['input']
+                self.assertEqual(set(json.loads(payload)),{'live/zte-cag-pin.local.json','live/zte-ice-pin.local.json'})
+                self.assertNotIn(b'MUST_NOT_IMPORT',payload)
+            subprocess.run([sys.executable,'-X','utf8','-c',migration.IMPORT_CODE],cwd=w.PROTOCOL,input=payload,capture_output=True,check=True)
+            self.assertEqual(w.p.load_json(self.console.config_file),original)
+            self.assertEqual(w.p.load_json(session),{'accessTicket':'EXISTING_TICKET'})
 
 if __name__=='__main__':unittest.main(verbosity=2)

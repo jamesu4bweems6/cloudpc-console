@@ -191,7 +191,7 @@ def ice_transport(sock,options,serial,directory,result,on_connected=None,hold_se
         cert=tunnel.getpeercert(binary_form=True)
         fingerprint=hashlib.sha256(cert).hexdigest()
         if pin and fingerprint!=pin['sha256']:
-            raise p.ProtocolError('ICE 证书固定值不匹配')
+            raise p.ConnectionError('ICE_PIN_MISMATCH')
         (directory/'ice-peer.local.der').write_bytes(cert)
         result.update(iceTlsConnected=True,iceTlsVersion=tunnel.version(),
                       iceTlsCertificateValidation='first_observation_sha256_pin' if pin else 'sdk_compatible_unverified')
@@ -215,7 +215,7 @@ def ice_transport(sock,options,serial,directory,result,on_connected=None,hold_se
 def run_gateway(machine,options,directory,ice=True,on_connected=None,hold_seconds=0,pin=None,authenticate=True,desktop=False):
     cag=machine['customLoginParams']['cagList'][0]
     if pin and pin['gateway']!=f"{cag['addr']}:{cag['port']}":
-        raise p.ProtocolError('ICE 证书固定主机不匹配')
+        raise p.ConnectionError('ICE_PIN_GATEWAY_MISMATCH')
     directory.mkdir(parents=True,exist_ok=True)
     client_key=secrets.randbits(31)
     body=bytearray(44)
@@ -259,7 +259,8 @@ def run_gateway(machine,options,directory,ice=True,on_connected=None,hold_second
                 elif code==200 and desktop:
                     main_channel(s,options,serial,directory,result)
     except (OSError,EOFError,p.ProtocolError) as exc:
-        result['errorType']=type(exc).__name__
+        result['errorType']=getattr(exc,'error_type',type(exc).__name__)
+        if isinstance(exc,p.ConnectionError):result['diagnosticCode']=exc.diagnostic_code
         if isinstance(exc,p.BusinessError):result['errorCode']=exc.code
     p.save_json(directory/'result.local.json',result)
     return result

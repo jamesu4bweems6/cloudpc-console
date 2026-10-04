@@ -57,6 +57,15 @@ class WebChecks(unittest.TestCase):
         self.assertFalse(self.console.loop);self.assertIsNone(self.console.next_run)
         self.assertFalse(self.console.busy)
 
+    def test_connection_diagnostics_use_fixed_hints_without_raw_exceptions(self):
+        result=w.safe_result({'success':False,'errorType':'SSLError','diagnosticCode':'CAG_TLS_NO_PIN',
+                              'failedStage':'connection_parameters','errorHint':'TOKEN_PRIVATE','rawError':'PASSWORD_PRIVATE'})
+        self.assertIn('CAG',result['errorHint']);self.assertIn('证书',result['errorHint'])
+        self.assertEqual(result['failedStage'],'connection_parameters')
+        self.assertNotIn('PRIVATE',json.dumps(result))
+        legacy=w.safe_result({'success':False,'errorType':'SSLError','gatewayAuthenticated':None})
+        self.assertIn('CAG',legacy['errorHint'])
+
     def test_http_host_origin_csrf_and_static_allowlist(self):
         server=w.ThreadingHTTPServer(('127.0.0.1',0),w.make_handler(self.console,0))
         port=server.server_address[1];server.RequestHandlerClass=w.make_handler(self.console,port)

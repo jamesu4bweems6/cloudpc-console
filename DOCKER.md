@@ -28,9 +28,37 @@ docker compose ps
 docker compose up -d --build
 ```
 
-首次启动生成空账号配置和固定设备身份；在网页保存手机号或用户名密码，再正常登录。真实桌面连接仍需要本人网关的 `zte-cag-pin.local.json` 和 `zte-ice-pin.local.json`，应从已有验证环境迁移至 `/data/live/`。空数据卷不会自动建立或放宽证书固定验证。当前项目已有的这两个文件可按上面的迁移流程复制。
+首次启动生成空账号配置和固定设备身份；在网页保存手机号或用户名密码，再正常登录。镜像已包含此前验证网关的两份固定值，启动时自动补齐 `/data/live/zte-cag-pin.local.json` 和 `zte-ice-pin.local.json`，已有文件不覆盖。对于同一已验证网关，换机器无需手动导入固定值。其他网关或证书变更仍需提供自己核对的固定值；程序不会关闭验证或自动接受新证书。
 
 ## 数据与维护
+
+### 已登录但连接失败：容器缺少证书固定文件
+
+若票据刷新成功，随后返回 `SSLError`，且 `/data/live/zte-cag-pin.local.json` 不存在，CAG HTTPS 可能因为其证书不被默认CA信任而失败。ICE也需要自己的固定文件。更新到附带默认固定值的版本并重建容器即可自动补齐，保留当前账号和登录会话：
+
+```sh
+git pull
+docker compose up -d --build --force-recreate
+```
+
+网页会显示固定诊断提示及失败阶段；不会关闭证书验证来绕过错误。若已有固定文件与目标不符，需要核对后手动更新，重建不会覆盖它。
+
+如需使用其他已核对的网关固定值，从对应验证环境取得两份文件，使用下述可选导入流程。不要重新导入整个账号目录来覆盖刚登录的会话：
+
+```sh
+git pull
+docker compose stop
+python -X utf8 docker_import.py --pins-only --source /path/to/verified/protocol
+docker compose up -d --build
+```
+
+源目录必须同时包含 `live/zte-cag-pin.local.json` 和 `live/zte-ice-pin.local.json`。`--pins-only` 只导入这两份文件，不覆盖账号、登录票据、目标或网页设置。更新及导入后先执行一次连接确认结果，再开启周期运行。网关或证书与固定值不匹配时继续停止连接。
+
+如果已取得仅含两份证书固定文件的本地包，可先执行 `python -m zipfile -e cmcc-gateway-pins.private.zip private-pins`，上面的 `--source` 改为 `./private-pins`。本地包和解压目录均被Git忽略。
+
+仓库的默认文件包含网关地址与证书SHA-256，不含账号或票据。若自己的目标不同于默认网关，需要独立核对自己的网关证书。`inspect_zte_tls.py` 只观察CAG证书，不能生成ICE固定值，观察本身也不等于身份验证。
+
+### 持久化与维护
 
 - 账号 `/data/account.local.json`、会话和原始日志 `/data/live/` 存在 Compose 命名卷 `cloudpc-data`；代码位于只读的 `/app`。静态协议配置随镜像发布，个人账号、票据和日志被 `.dockerignore` 排除，不会进入构建上下文。
 - `docker compose down` 停止并删除容器，数据卷保留；`docker compose up -d --build` 重建镜像并继续使用原数据。**`docker compose down -v` 会删除数据卷。**
@@ -67,4 +95,4 @@ docker run -d --name cloudpc-console --init --restart unless-stopped \
 
 源码也支持 `CLOUDPC_DATA_DIR` 指定数据目录；不设置时保留原本 protocol 目录的行为。原本 `start-web.ps1` 使用本机127.0.0.1监听地址；Docker 命令显式使用 `--bind 0.0.0.0`。
 
-交付环境未安装 Docker：已完成离线回归、独立数据目录启动及映射端口来源校验，未进行实际 Linux 镜像构建、容器启动或容器内云电脑连接。部署配置参考 [Docker Compose 服务规范](https://docs.docker.com/reference/compose-file/services/)。
+本机交付环境未安装Docker；GitHub Actions会执行Linux镜像构建、容器HTTP启动及默认固定文件初始化检查，结果见仓库Actions。该检查不使用个人账号，容器内真实云电脑连接仍需部署后确认。部署配置参考 [Docker Compose 服务规范](https://docs.docker.com/reference/compose-file/services/)。

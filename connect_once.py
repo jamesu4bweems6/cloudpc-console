@@ -16,31 +16,38 @@ def main():
     state=p.load_json(args.session)
     if state.get('deviceUid')!=config['common']['deviceUid']:
         raise p.ProtocolError('会话与本地设备身份不一致，请重新登录')
+    p.ensure_gateway_pins()
     directory=p.DATA_DIR/'live'/(timestamp()+'-connect-once');directory.mkdir(parents=True)
     result={'stage':'connect-once','startedAt':dt.datetime.now(dt.timezone.utc).isoformat(),
             'success':False,'desktopProtocolConnected':False,'expiryRenewalVerified':False}
     client=p.Client(p.load_json(p.HERE/'sample-profile.json'),config,state,
                     transport=LocalAuditTransport(directory),audit_dir=directory)
+    phase='ticket_refresh'
     try:
         client.refresh_ticket()
         p.save_json(args.session,client.state)
         result['ticketRefreshAccepted']=True
         if client.state.get('pendingConnectId'):
+            phase='pending_disconnect'
             client.session_status(client.state['pendingConnectId'],False)
             client.state.pop('pendingConnectId')
-        devices=client.devices()
+        phase='device_query';devices=client.devices()
+        phase='target_selection'
         matches=[m for m in devices['body']['machineList'] if m.get('machineId')==config['target'].get('machineId')]
         if len(matches)!=1 or matches[0].get('originCompanyCode')!='ZTE':
             raise p.ProtocolError('仅支持本人配置的唯一 ZTE 桌面')
         machine=matches[0]
         p.save_json(directory/'devices.local.json',devices)
-        p.save_json(directory/'before.local.json',client.snapshot(config['target']))
-        client.record_device();client.session_status()
+        phase='snapshot_before';p.save_json(directory/'before.local.json',client.snapshot(config['target']))
+        phase='session_registration';client.record_device();client.session_status()
+        phase='connection_parameters'
         value=z.fetch_parameters(machine,directory/'parameters')
+        phase='parameter_decode'
         options=g.connection_options(machine,value)
+        phase='ice_pin_check'
         pin_file=p.DATA_DIR/'live/zte-ice-pin.local.json'
         if not pin_file.exists():
-            raise p.ProtocolError('需要先保存已观察到的本人 ICE 网关证书固定值')
+            raise p.ConnectionError('ICE_PIN_MISSING')
         pin=p.load_json(pin_file)
         def connected():
             connect_id=client.machine_connected(machine)
@@ -48,12 +55,15 @@ def main():
             client.session_status(connect_id,True)
             result['connectedReportAccepted']=True
             print('桌面认证成功，在线连接上报已接受。',flush=True)
+        phase='desktop_channel'
         result.update(g.run_gateway(machine,options,directory/'desktop',
                                    on_connected=connected,hold_seconds=args.hold_seconds,pin=pin))
         result['stage']='connect-once'
         result['success']=bool(result.get('controlSessionCompleted') and result.get('connectedReportAccepted'))
+        if not result['success']:result['failedStage']=phase
     except (p.ProtocolError,requests.RequestException,OSError,ValueError,KeyError) as exc:
-        result.update(errorType=type(exc).__name__)
+        result.update(errorType=getattr(exc,'error_type',type(exc).__name__),failedStage=phase)
+        if isinstance(exc,p.ConnectionError):result['diagnosticCode']=exc.diagnostic_code
         if isinstance(exc,p.BusinessError):result['errorCode']=exc.code
     finally:
         pending=client.state.get('pendingConnectId')

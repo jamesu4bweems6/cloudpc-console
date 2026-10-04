@@ -10,6 +10,9 @@
 !keepalive_loop.py
 !sample-profile.json
 !zte-sample-profile.json
+!gateway-pins
+!gateway-pins/zte-cag-pin.json
+!gateway-pins/zte-ice-pin.json
 !web
 !web/server.py
 !web/index.html

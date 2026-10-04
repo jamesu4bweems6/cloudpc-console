@@ -23,6 +23,7 @@ print('Imported JSON files: '+str(len(values)))
 def main():
     ap=argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--source',type=pathlib.Path,default=HERE)
+    ap.add_argument('--pins-only',action='store_true',help='只导入两份证书固定文件，保留目标账号及会话')
     args=ap.parse_args()
     if not shutil.which('docker'):ap.error('未安装 Docker 或 docker 未加入 PATH')
     def compose(*cmd,**kwargs):
@@ -30,8 +31,11 @@ def main():
     running=compose('ps','--status','running','--quiet',capture_output=True,text=True)
     if running.stdout.strip():ap.error('请先在网页停止周期连接并等待任务完成，再执行 docker compose stop')
     source=args.source.resolve()
-    values={name:json.loads((source/name).read_text(encoding='utf-8')) for name in FILES if (source/name).is_file()}
-    if 'account.local.json' not in values:ap.error('源目录缺少 account.local.json')
+    names=('live/zte-cag-pin.local.json','live/zte-ice-pin.local.json') if args.pins_only else FILES
+    values={name:json.loads((source/name).read_text(encoding='utf-8')) for name in names if (source/name).is_file()}
+    if args.pins_only:
+        if len(values)!=2:ap.error('源目录需包含 live 下的 CAG 和 ICE 两份已核对证书固定文件')
+    elif 'account.local.json' not in values:ap.error('源目录缺少 account.local.json')
     compose('create','--build')
     compose('run','--rm','--no-deps','-T','--entrypoint','python','cloudpc','-c',IMPORT_CODE,
             input=json.dumps(values,ensure_ascii=False).encode('utf-8'))
