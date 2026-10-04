@@ -6,10 +6,11 @@ services:
     init: true
     restart: unless-stopped
     ports:
-      - "127.0.0.1:${CLOUDPC_PORT:-8766}:8765"
+      - "0.0.0.0:${CLOUDPC_PORT:-8766}:8765"
     environment:
       CLOUDPC_DATA_DIR: /data
-      CLOUDPC_PUBLIC_ORIGINS: "http://127.0.0.1:${CLOUDPC_PORT:-8766},http://localhost:${CLOUDPC_PORT:-8766}"
+      CLOUDPC_PUBLIC_PORT: "${CLOUDPC_PORT:-8766}"
+      CLOUDPC_PUBLIC_ORIGINS: "${CLOUDPC_PUBLIC_ORIGINS:-}"
     volumes:
       - cloudpc-data:/data
     read_only: true

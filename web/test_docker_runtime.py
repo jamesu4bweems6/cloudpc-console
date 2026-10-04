@@ -69,6 +69,49 @@ class ContainerRuntimeChecks(unittest.TestCase):
         for value in ('*','http://*.example','file:///tmp','http://user:secret@example.com','http://localhost:8000/path','http://localhost:bad'):
             with self.subTest(value=value),self.assertRaises(ValueError):w.allowed_origins(8765,[value])
 
+    def test_remote_ip_and_custom_domain_keep_origin_and_csrf_checks(self):
+        server=w.ThreadingHTTPServer(('127.0.0.1',0),w.make_handler(self.console,0))
+        port=server.server_address[1]
+        server.RequestHandlerClass=w.make_handler(self.console,port,['https://cloudpc.example.com'],8766)
+        thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+        def request(method,path,host,origin=None,csrf=None):
+            conn=http.client.HTTPConnection('127.0.0.1',port)
+            headers={'Host':host,'Content-Type':'application/json'}
+            if origin is not None:headers['Origin']=origin
+            if csrf is not None:headers['X-CSRF-Token']=csrf
+            conn.request(method,path,headers=headers,body='{}' if method=='POST' else None)
+            response=conn.getresponse();status=response.status;response.read();conn.close();return status
+        try:
+            for host in ('192.0.2.10:8766','[2001:db8::10]:8766','localhost:8766'):
+                self.assertEqual(request('GET','/',host),200)
+                self.assertEqual(request('POST','/api/loop-stop',host,'http://'+host,self.console.csrf),200)
+            self.assertEqual(request('GET','/','cloudpc.example.com'),200)
+            self.assertEqual(request('POST','/api/loop-stop','cloudpc.example.com','https://cloudpc.example.com',self.console.csrf),200)
+            for host in ('192.0.2.10:8767','evil.example:8766','192.0.2.10:8766@evil.example','192.0.2.10:8766/path'):
+                self.assertEqual(request('GET','/api/state',host),403)
+            for origin in (None,'http://evil.example','http://192.0.2.11:8766','http://192.0.2.10:8766.evil.example'):
+                self.assertEqual(request('POST','/api/loop-stop','192.0.2.10:8766',origin,self.console.csrf),403)
+            self.assertEqual(request('POST','/api/loop-stop','192.0.2.10:8766','http://192.0.2.10:8766','wrong'),403)
+            self.assertEqual(request('GET','/healthz',f'127.0.0.1:{port}'),200)
+        finally:server.shutdown();server.server_close();thread.join()
+
+    def test_remote_access_opt_in_and_changed_public_port(self):
+        server=w.ThreadingHTTPServer(('127.0.0.1',0),w.make_handler(self.console,0))
+        port=server.server_address[1]
+        def get(host):
+            conn=http.client.HTTPConnection('127.0.0.1',port)
+            conn.request('GET','/',headers={'Host':host})
+            response=conn.getresponse();status=response.status;response.read();conn.close();return status
+        thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+        try:
+            server.RequestHandlerClass=w.make_handler(self.console,port)
+            self.assertEqual(get('192.0.2.10:8766'),403)
+            server.RequestHandlerClass=w.make_handler(self.console,port,public_port=18766)
+            self.assertEqual(get('192.0.2.10:18766'),200)
+            self.assertEqual(get('localhost:18766'),200)
+            self.assertEqual(get('192.0.2.10:8766'),403)
+        finally:server.shutdown();server.server_close();thread.join()
+
     def test_shutdown_stops_schedule_and_waits_for_current_worker(self):
         self.console.loop=True;self.console.next_run=123;job=Mock();self.console.job=job
         self.console.close()

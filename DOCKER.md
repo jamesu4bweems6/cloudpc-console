@@ -18,7 +18,7 @@ docker compose up -d
 docker compose ps
 ```
 
-打开 **http://127.0.0.1:8766**，也支持 http://localhost:8766。默认 8766 避开已有的本地 8765 网页服务。容器内仍监听 8765；Host/Origin 校验允许配置的宿主机端口。运行依赖独立 Python 镜像，无需 IPA、原生 SDK、Node 或数据库。
+服务器本机打开 **http://127.0.0.1:8766** 或 http://localhost:8766，其他设备使用 **http://服务器IP:8766**。宿主机绑定 `0.0.0.0:8766`，容器内部监听 `0.0.0.0:8765`；IP访问必须使用配置的宿主机端口，写操作继续检查同源请求和CSRF。运行依赖独立 Python 镜像，无需 IPA、原生 SDK、Node 或数据库。控制台没有独立管理密码，应只对自己的可信设备开放8766。
 
 迁移工具在宿主机使用 Python 标准库，通过标准输入传送允许的 JSON 文件，并以容器服务用户写入数据卷，避免直接复制造成文件所有者不一致。不会将凭据写进命令行、镜像或终端输出。原有详细历史日志保留在宿主机，新的连接日志写入容器数据卷。另一个源目录可用 `python docker_import.py --source /path/to/protocol`；Linux/macOS 执行迁移成功后再执行 `docker compose up -d`。
 
@@ -37,10 +37,22 @@ docker compose up -d --build
 - `docker compose logs -f --tail=100` 查看服务日志；`docker compose ps` 查看启动和健康检查状态。健康检查仅检查本地 HTTP 服务，不发云电脑连接请求。
 - 容器启动或重启后周期连接默认关闭，需要在网页手动开启。关闭页面后服务继续运行。周期连接失败即停止；重启策略不会自动恢复周期任务。
 - `docker compose stop` 发出终止信号，停止后续轮次并给当前操作最多85秒完成；Compose 给进程120秒退出时间。建议在页面停止周期连接、等待当前任务完成后再维护。
-- 服务以 UID/GID 10001 运行，只有数据卷和临时目录可写。容器端口默认只发布到宿主机127.0.0.1。
+- 服务以 UID/GID 10001 运行，只有数据卷和临时目录可写。容器端口发布到宿主机所有IPv4网卡。
 - 关机期限是否被延续仍需跨原始1–2天观察验证；容器健康或连接成功均不能代替此验证。
 
 修改端口：把 `.env.example` 复制为 `.env`，调整 `CLOUDPC_PORT=8766` 后执行 `docker compose up -d`。来源校验同步使用该端口。
+
+域名或HTTPS反向代理访问：在 `.env` 中设置 `CLOUDPC_PUBLIC_ORIGINS=https://cloudpc.example.com`，多个地址用逗号分隔，不带路径或结尾斜杠。反向代理需保留浏览器的原始Host。普通IP访问无需额外配置。
+
+从旧版本更新监听绑定和后端校验：
+
+```sh
+git pull
+docker compose up -d --build --force-recreate
+docker compose ps
+```
+
+应看到 `0.0.0.0:8766->8765/tcp`。若仍无法访问，先在服务器运行 `curl http://127.0.0.1:8766/healthz` 并查看 `docker compose logs --tail=100`；本机可访问而其他设备不可访问时，再检查服务器防火墙或云安全组是否允许所需设备访问8766。重建容器保留数据卷，周期连接需在页面重新开启。
 
 如需手动 `docker run`：
 
@@ -48,8 +60,8 @@ docker compose up -d --build
 docker build -t cloudpc-console:local .
 docker volume create cloudpc-data
 docker run -d --name cloudpc-console --init --restart unless-stopped \
-  -p 127.0.0.1:8766:8765 -v cloudpc-data:/data \
-  -e CLOUDPC_PUBLIC_ORIGINS=http://127.0.0.1:8766,http://localhost:8766 \
+  -p 0.0.0.0:8766:8765 -v cloudpc-data:/data \
+  -e CLOUDPC_PUBLIC_PORT=8766 \
   cloudpc-console:local
 ```
 

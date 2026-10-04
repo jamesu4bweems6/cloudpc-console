@@ -1,6 +1,6 @@
 """Web console for the existing own-account protocol client."""
 from __future__ import annotations
-import argparse,datetime as dt,json,os,pathlib,secrets,signal,subprocess,sys,threading,time
+import argparse,datetime as dt,ipaddress,json,os,pathlib,secrets,signal,subprocess,sys,threading,time
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 from urllib.parse import urlsplit
 
@@ -240,12 +240,25 @@ def allowed_origins(port,extra=()):
         origins.add(value)
     return origins
 
-def make_handler(console,port,extra_origins=()):
+def public_ip_host(host,port):
+    if not host or port is None:return False
+    try:
+        parsed=urlsplit('http://'+host)
+        if (parsed.netloc!=host or parsed.path or parsed.query or parsed.fragment
+            or parsed.username or parsed.password or parsed.port!=port or '%' in host):return False
+        ipaddress.ip_address(parsed.hostname)
+        return True
+    except (ValueError,TypeError):return False
+
+def make_handler(console,port,extra_origins=(),public_port=None):
     origins=allowed_origins(port,extra_origins)
+    if public_port is not None:origins.update(allowed_origins(public_port))
     hosts={urlsplit(origin).netloc for origin in origins}
     class Handler(BaseHTTPRequestHandler):
         def log_message(self,*args):pass
-        def allowed(self):return self.headers.get('Host') in hosts
+        def allowed(self):
+            host=self.headers.get('Host')
+            return host in hosts or public_ip_host(host,public_port)
         def reply(self,code,value,content_type='application/json; charset=utf-8'):
             data=json.dumps(value,ensure_ascii=False).encode() if isinstance(value,(dict,list)) else value
             self.send_response(code)
@@ -254,7 +267,7 @@ def make_handler(console,port,extra_origins=()):
             self.send_header('Content-Security-Policy',"default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'")
             self.end_headers();self.wfile.write(data)
         def do_GET(self):
-            if not self.allowed():return self.reply(403,{'error':'仅允许本机访问'})
+            if not self.allowed():return self.reply(403,{'error':'访问地址未配置或端口不匹配'})
             path=urlsplit(self.path).path
             if path=='/healthz':return self.reply(200,{'ok':True})
             if path=='/api/state':return self.reply(200,console.state())
@@ -262,10 +275,12 @@ def make_handler(console,port,extra_origins=()):
             if path not in assets:return self.reply(404,{'error':'未找到'})
             name,mime=assets[path];self.reply(200,(HERE/name).read_bytes(),mime)
         def do_POST(self):
-            if not self.allowed():return self.reply(403,{'error':'仅允许本机访问'})
+            if not self.allowed():return self.reply(403,{'error':'访问地址未配置或端口不匹配'})
             origin=self.headers.get('Origin')
-            if origin not in origins or self.headers.get('X-CSRF-Token')!=console.csrf:
-                return self.reply(403,{'error':'请求来源或校验不匹配，请重新打开本地页面'})
+            host=self.headers.get('Host')
+            same_ip_origin=public_ip_host(host,public_port) and origin in (f'http://{host}',f'https://{host}')
+            if (origin not in origins and not same_ip_origin) or self.headers.get('X-CSRF-Token')!=console.csrf:
+                return self.reply(403,{'error':'请求来源或校验不匹配，请重新打开页面'})
             if self.headers.get('Content-Type','').split(';')[0]!='application/json':return self.reply(415,{'error':'需要JSON请求'})
             try:
                 length=int(self.headers.get('Content-Length','0'))
@@ -286,12 +301,14 @@ def main():
     ap=argparse.ArgumentParser(description=__doc__);ap.add_argument('--port',type=int,default=8765)
     ap.add_argument('--bind',choices=('127.0.0.1','0.0.0.0'),default='127.0.0.1')
     ap.add_argument('--public-origin',action='append',default=[])
+    ap.add_argument('--public-port',type=int,default=os.environ.get('CLOUDPC_PUBLIC_PORT'),help='允许通过IP访问的宿主机端口；默认不启用')
     args=ap.parse_args()
     if not 1024<=args.port<=65535:ap.error('端口必须在1024..65535')
+    if args.public_port is not None and not 1<=args.public_port<=65535:ap.error('公开端口必须在1..65535')
     extra=args.public_origin+[x.strip() for x in os.environ.get('CLOUDPC_PUBLIC_ORIGINS','').split(',') if x.strip()]
     try:allowed_origins(args.port,extra)
     except ValueError as exc:ap.error(str(exc))
-    console=Console();server=ThreadingHTTPServer((args.bind,args.port),make_handler(console,args.port,extra))
+    console=Console();server=ThreadingHTTPServer((args.bind,args.port),make_handler(console,args.port,extra,args.public_port))
     def stop(signum,frame):
         with console.lock:console.stopping=True;console.loop=False;console.next_run=None
         console.wake.set()
