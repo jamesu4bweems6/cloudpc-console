@@ -69,6 +69,48 @@ class WebChecks(unittest.TestCase):
         legacy=w.safe_result({'success':False,'errorType':'SSLError','gatewayAuthenticated':None})
         self.assertIn('CAG',legacy['errorHint'])
 
+    def test_expired_session_status_persists_and_blocks_schedule(self):
+        session=w.p.load_json(self.console.session_file);session['authRequired']=True
+        w.p.save_json(self.console.session_file,session)
+        state=self.console.state()
+        self.assertTrue(state['authenticationRequired']);self.assertFalse(state['sessionAvailable'])
+        with self.assertRaises(ValueError):self.console.set_loop(True)
+        restarted=w.Console(start_scheduler=False)
+        try:self.assertTrue(restarted.state()['authenticationRequired'])
+        finally:restarted.close()
+
+    def test_connection_password_recovery_keeps_schedule_running(self):
+        result={'stage':'connect-once','success':True,'sessionRecoveryAttempted':True,'sessionRecovered':True}
+        proc=Mock();proc.stdout=iter([json.dumps({'stage':'session-recovery','status':'started'}),
+                                   json.dumps({'stage':'session-recovery','status':'success'}),json.dumps(result)])
+        proc.returncode=0;self.console.loop=True
+        with patch.object(w.subprocess,'Popen',return_value=proc) as spawn:self.console.worker('connect',{})
+        spawn.assert_called_once();self.assertTrue(self.console.loop);self.assertIsNotNone(self.console.next_run)
+        self.assertTrue(self.console.last_result['sessionRecovered'])
+        self.assertTrue(any('密码续登成功' in e['message'] for e in self.console.events))
+
+    def test_devices_auth_failure_persists_without_sending_sms(self):
+        client=Mock();client.config=w.p.load_json(self.root/'account.local.json')
+        client.state={'accessTicket':'TICKET_PRIVATE','authRequired':True}
+        client.prepare_session.side_effect=w.p.AuthenticationRequired('AUTH_TRUST_REQUIRED','30002009')
+        with patch.object(self.console,'client',return_value=client):self.console.worker('devices',{})
+        client.send_sms.assert_not_called();self.assertTrue(self.console.state()['authenticationRequired'])
+        self.assertTrue(any('设备可信短信验证' in e['message'] for e in self.console.events))
+
+    def test_connection_auth_challenge_stops_without_replaying_desktop(self):
+        result={'stage':'connect-once','success':False,'errorType':'BusinessError','errorCode':'30002060',
+                'diagnosticCode':'AUTH_TWO_FACTOR_REQUIRED','authenticationRequired':True}
+        proc=Mock();proc.stdout=iter([json.dumps(result)]);proc.returncode=1;self.console.loop=True
+        with patch.object(w.subprocess,'Popen',return_value=proc) as spawn:self.console.worker('connect',{})
+        spawn.assert_called_once();self.assertFalse(self.console.loop)
+        self.assertIn('双因素短信验证',self.console.last_result['errorHint'])
+
+    def test_successful_manual_login_clears_expired_session_flag(self):
+        client=Mock();client.config=w.p.load_json(self.root/'account.local.json')
+        client.state={'accessTicket':'NEW_PRIVATE','deviceUid':'test'}
+        self.console.finish_login(client,{'errorCode':'200'})
+        self.assertFalse(self.console.state()['authenticationRequired']);self.assertTrue(self.console.state()['sessionAvailable'])
+
     def test_http_host_origin_csrf_and_static_allowlist(self):
         server=w.ThreadingHTTPServer(('127.0.0.1',0),w.make_handler(self.console,0))
         port=server.server_address[1];server.RequestHandlerClass=w.make_handler(self.console,port)

@@ -1,7 +1,7 @@
 """Pure CEM HTTP protocol reconstructed from the supplied iOS AOT snapshot.
 
 Static reconstruction; report-probe is an experiment, not proof of shutdown renewal.
-No native SDK, app automation, scheduled task, or automatic authentication retries.
+No native SDK or app automation. Session preparation permits one password recovery on 401.
 """
 from __future__ import annotations
 import argparse
@@ -30,6 +30,10 @@ class ProtocolError(Exception):
     pass
 
 CONNECTION_HINTS = {
+    'AUTH_CREDENTIALS_REQUIRED': '登录票据已失效；未保存账号密码，请在网页重新登录。仅短信登录无法自动续登。',
+    'AUTH_TRUST_REQUIRED': '自动续登需要设备可信短信验证，请点击密码登录并完成验证码验证。',
+    'AUTH_TWO_FACTOR_REQUIRED': '自动续登需要双因素短信验证，请点击密码登录并完成验证码验证。',
+    'AUTH_ACCOUNT_REQUIRED': '自动续登需要选择企业账号，请保存企业用户名后重新登录。',
     'CAG_TLS_NO_PIN': 'CAG HTTPS 握手失败，未配置 CAG 证书固定文件。请导入已核对的 zte-cag-pin.local.json。',
     'CAG_TLS_PINNED_FAILURE': '已配置 CAG 证书固定值，但 HTTPS 验证或握手失败。请核对证书是否变更及 TLS 兼容性。',
     'CAG_PIN_GATEWAY_MISMATCH': 'CAG 证书固定文件与本次返回的网关不匹配，请核对目标及固定文件。',
@@ -49,6 +53,7 @@ def connection_failure_message(result):
     result = result or {}
     hint = CONNECTION_HINTS.get(result.get('diagnosticCode'))
     if hint:return hint
+    if str(result.get('errorCode')) == '401':return '登录会话已失效，请重新登录。'
     if result.get('errorType') == 'SSLError':
         return ('ICE TLS 验证或握手失败，请核对 ICE 固定证书。' if result.get('gatewayAuthenticated') else
                 'CAG HTTPS 验证或握手失败，请检查 CAG 固定证书及 TLS 配置。')
@@ -62,6 +67,12 @@ class BusinessError(ProtocolError):
         label = {'30002009': '需要设备可信验证', '30002060': '需要双因素验证',
                  '10002034': '需要选择企业账号', '30001004': '需要客户端提示验证'}.get(self.code, '业务请求失败')
         super().__init__(f'{label} (errorCode={self.code})')
+
+class AuthenticationRequired(ProtocolError):
+    def __init__(self, diagnostic_code, code='401'):
+        self.diagnostic_code, self.code = diagnostic_code, str(code)
+        self.error_type = 'BusinessError'
+        super().__init__(CONNECTION_HINTS[diagnostic_code])
 
 def dumps(value):
     return json.dumps(value, ensure_ascii=False, separators=(',', ':'), allow_nan=False)
@@ -159,6 +170,8 @@ class Client:
         self.transport = transport or requests.Session()
         self.audit_dir = pathlib.Path(audit_dir) if audit_dir else None
         self.count = 0
+        self.session_recovery_attempted = False
+        self.session_recovered = False
         self.common = dict(config['common'])
         for field in ('deviceUid', 'deviceName', 'clientVersion', 'deviceModel', 'operatingVersion'):
             if not self.common.get(field):
@@ -279,6 +292,44 @@ class Client:
         self.state['accessToken']=token
         self.state['tokenRefreshedAt']=dt.datetime.now(dt.timezone.utc).isoformat()
         return result
+
+    def prepare_session(self, read=None, on_recovery=None):
+        """Refresh then optionally read; recover once on 401 before desktop actions.
+
+        The callback must be a read-only operation. Never retry connection reports,
+        desktop handshakes, network failures, or SMS verification here.
+        """
+        if self.state.get('deviceUid') != self.common['deviceUid']:
+            raise ProtocolError('会话与本地设备身份不一致，请重新登录')
+        try:
+            self.refresh_ticket()
+            value = read() if read else None
+        except BusinessError as exc:
+            if exc.code != '401':raise
+            self.state['authRequired'] = True
+            self.session_recovery_attempted = True
+            if on_recovery:on_recovery('started')
+            auth = self.config.get('auth', {})
+            if not auth.get('username') or not auth.get('password'):
+                raise AuthenticationRequired('AUTH_CREDENTIALS_REQUIRED') from None
+            response = self.verify_password(auth['username'], auth['password'])
+            code = str(response.get('errorCode'))
+            hints = {'30002009':'AUTH_TRUST_REQUIRED', '30002060':'AUTH_TWO_FACTOR_REQUIRED'}
+            if code in hints:raise AuthenticationRequired(hints[code], code)
+            if code == '10002034' and not auth.get('selected_username'):
+                raise AuthenticationRequired('AUTH_ACCOUNT_REQUIRED', code)
+            # Keep unfinished disconnect identity until its cleanup succeeds.
+            pending = {k:self.state[k] for k in ('pendingConnectId','loginUid') if k in self.state}
+            self.finish_login(response, selected_username=auth.get('selected_username'))
+            if pending.get('pendingConnectId'):self.state.update(pending)
+            self.session_recovered = True
+            if on_recovery:on_recovery('success')
+            try:value = read() if read else None
+            except BusinessError as retry_error:
+                if retry_error.code == '401':self.state['authRequired'] = True
+                raise
+        self.state.pop('authRequired', None)
+        return value
 
     def record_device(self):
         data = {'accessToken': self.token, 'deviceUid': self.common['deviceUid'],

@@ -22,16 +22,16 @@ def main():
             'success':False,'desktopProtocolConnected':False,'expiryRenewalVerified':False}
     client=p.Client(p.load_json(p.HERE/'sample-profile.json'),config,state,
                     transport=LocalAuditTransport(directory),audit_dir=directory)
-    phase='ticket_refresh'
+    phase='session_prepare'
     try:
-        client.refresh_ticket()
+        devices=client.prepare_session(client.devices, on_recovery=lambda status:
+            print(json.dumps({'stage':'session-recovery','status':status}),flush=True))
         p.save_json(args.session,client.state)
         result['ticketRefreshAccepted']=True
         if client.state.get('pendingConnectId'):
             phase='pending_disconnect'
             client.session_status(client.state['pendingConnectId'],False)
             client.state.pop('pendingConnectId')
-        phase='device_query';devices=client.devices()
         phase='target_selection'
         matches=[m for m in devices['body']['machineList'] if m.get('machineId')==config['target'].get('machineId')]
         if len(matches)!=1 or matches[0].get('originCompanyCode')!='ZTE':
@@ -61,10 +61,13 @@ def main():
         result['stage']='connect-once'
         result['success']=bool(result.get('controlSessionCompleted') and result.get('connectedReportAccepted'))
         if not result['success']:result['failedStage']=phase
+        if str(result.get('errorCode'))=='401':client.state['authRequired']=True
     except (p.ProtocolError,requests.RequestException,OSError,ValueError,KeyError) as exc:
         result.update(errorType=getattr(exc,'error_type',type(exc).__name__),failedStage=phase)
-        if isinstance(exc,p.ConnectionError):result['diagnosticCode']=exc.diagnostic_code
-        if isinstance(exc,p.BusinessError):result['errorCode']=exc.code
+        if isinstance(exc,(p.ConnectionError,p.AuthenticationRequired)):result['diagnosticCode']=exc.diagnostic_code
+        if isinstance(exc,(p.BusinessError,p.AuthenticationRequired)):
+            result['errorCode']=exc.code
+            if exc.code=='401' or isinstance(exc,p.AuthenticationRequired):client.state['authRequired']=True
     finally:
         pending=client.state.get('pendingConnectId')
         if pending:
@@ -74,9 +77,14 @@ def main():
                 result['disconnectedReportAccepted']=True
             except p.ProtocolError as exc:
                 result.update(cleanupErrorType=type(exc).__name__,success=False)
+                if isinstance(exc,p.BusinessError) and exc.code=='401':
+                    client.state['authRequired']=True;result['errorCode']=exc.code
         try:p.save_json(directory/'after.local.json',client.snapshot(config['target']))
         except p.ProtocolError:result['afterSnapshotFailed']=True
         p.save_json(args.session,client.state)
+        result.update(sessionRecoveryAttempted=client.session_recovery_attempted,
+                      sessionRecovered=client.session_recovered,
+                      authenticationRequired=bool(client.state.get('authRequired')))
         result['finishedAt']=dt.datetime.now(dt.timezone.utc).isoformat()
         p.save_json(directory/'result.local.json',result)
         print(json.dumps(result,ensure_ascii=False))

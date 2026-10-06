@@ -18,7 +18,7 @@ def mask(value):
 RESULT_FIELDS=('success','desktopProtocolConnected','gatewayAuthenticated','desktopChannelAuthenticated',
  'mainInitReceived','channelsListReceived','controlSessionCompleted','controlHoldSeconds',
  'connectedReportAccepted','disconnectedReportAccepted','ticketRefreshAccepted','startedAt','finishedAt','errorCode','errorType',
- 'diagnosticCode','failedStage')
+ 'diagnosticCode','failedStage','sessionRecoveryAttempted','sessionRecovered','authenticationRequired')
 def safe_result(value):
     result={k:value[k] for k in RESULT_FIELDS if k in value}
     if not value.get('success'):result['errorHint']=p.connection_failure_message(result)
@@ -80,7 +80,9 @@ class Console:
             return {'csrf':self.csrf,'busy':self.busy,'action':self.action,'loopEnabled':self.loop,
                     'nextRunAt':dt.datetime.fromtimestamp(self.next_run,TZ).isoformat() if self.next_run else None,
                     'intervalHours':self.interval,'holdSeconds':self.hold,'pending':self.pending,
-                    'sessionAvailable':bool(session.get('accessTicket')),'sessionAt':session.get('tokenRefreshedAt') or session.get('loggedInAt'),
+                    'sessionAvailable':bool(session.get('accessTicket')) and not session.get('authRequired'),
+                    'authenticationRequired':bool(session.get('authRequired')),
+                    'sessionAt':session.get('tokenRefreshedAt') or session.get('loggedInAt'),
                     'auth':{'mobileHint':mask(auth.get('mobile')),'usernameConfigured':bool(auth.get('username')),
                             'passwordConfigured':bool(auth.get('password'))},
                     'machines':self.machines,'targetId':cfg.get('target',{}).get('machineId'),
@@ -147,13 +149,15 @@ class Console:
         self.event('登录与票据交换成功。','success')
 
     def worker(self,action,data):
+        client=None
         try:
             if action=='connect':self.connect()
             else:
                 client=self.client();auth=client.config['auth']
                 if action=='devices':
-                    client.refresh_ticket();p.save_json(self.session_file,client.state)
-                    response=client.devices();p.save_json(self.data_dir/'live/web-devices.local.json',response)
+                    response=client.prepare_session(client.devices,on_recovery=self.recovery_event)
+                    p.save_json(self.session_file,client.state)
+                    p.save_json(self.data_dir/'live/web-devices.local.json',response)
                     self.machines=[safe_machine(m) for m in response['body']['machineList']]
                     self.event('云电脑状态已更新。','success')
                 elif action=='password':
@@ -172,11 +176,14 @@ class Console:
                         response=client.trust_device(self.challenge,a['mobile'],code,a['username']) if self.pending=='trust' else client.verify_two_factor(self.challenge,a['username'],a['password'],a['mobile'],code)
                     self.finish_login(client,response)
         except Exception as exc:
-            code=exc.code if isinstance(exc,p.BusinessError) else None
+            code=exc.code if isinstance(exc,(p.BusinessError,p.AuthenticationRequired)) else None
             labels={'401':'会话已失效，请重新登录。','30001004':'账号或密码验证失败，请检查本地配置。',
                     '10002034':'需要选择企业账号，请填写企业用户名后再登录。'}
             message=labels.get(code,'操作未完成：'+type(exc).__name__+(('（业务码 '+code+'）') if code else ''))
             if isinstance(exc,p.ProtocolError) and not isinstance(exc,p.BusinessError):message=str(exc)[:150]
+            if action=='devices' and client is not None:
+                if code=='401':client.state['authRequired']=True
+                p.save_json(self.session_file,client.state)
             self.event(message,'error')
             if action=='connect':
                 with self.lock:self.loop=False;self.next_run=None
@@ -186,6 +193,11 @@ class Console:
                 self.busy=False;self.action=''
                 if self.loop:self.next_run=time.time()+self.interval*3600
             self.wake.set()
+
+    def recovery_event(self,status):
+        self.event({'started':'登录票据已失效，正在尝试一次密码续登。',
+                    'success':'密码续登成功，已更新本地会话。'}[status],
+                   'success' if status=='success' else 'info')
 
     def connect(self):
         cmd=[sys.executable,'-X','utf8',str(PROTOCOL/'connect_once.py'),'--config',str(self.config_file),'--session',str(self.session_file),
@@ -199,6 +211,8 @@ class Console:
             try:value=json.loads(line)
             except (ValueError,TypeError):continue
             if value.get('stage')=='connect-once':result=value
+            elif value.get('stage')=='session-recovery':
+                if value.get('status') in ('started','success'):self.recovery_event(value['status'])
             elif value.get('path'):
                 path=value['path'].removeprefix(p.PREFIX)
                 if path in labels:self.event(labels[path])
@@ -214,7 +228,7 @@ class Console:
             if enabled:
                 if self.stopping:raise ValueError('服务正在停止')
                 if self.busy:raise ValueError('请等待当前操作完成')
-                if not self.session_file.exists():raise ValueError('请先登录')
+                if not self.session_file.exists() or p.load_json(self.session_file).get('authRequired'):raise ValueError('请先重新登录')
                 self.loop=True;self.next_run=time.time()
                 self.event('周期连接已开启，将立即执行首次连接。','success')
             else:

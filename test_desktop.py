@@ -1,5 +1,6 @@
 """Offline checks for observed ZTE layouts and fragmented transport reads."""
-import struct,tempfile,pathlib,unittest
+import contextlib,io,json,struct,sys,tempfile,pathlib,unittest
+import connect_once as connection
 import zte_gateway_probe as g
 import cloudpc_protocol as p
 import zte_connection as z
@@ -114,5 +115,111 @@ class DesktopChecks(unittest.TestCase):
         c,_=client([ok({})],STATE)
         with self.assertRaises(p.ProtocolError):c.refresh_ticket()
         self.assertEqual(c.state['accessToken'],STATE['accessToken'])
+
+    def test_prepare_valid_session_never_password_logs_in(self):
+        c,service=client([ok({'accessToken':'new-token'}),ok({'machineList':[]})],STATE)
+        self.assertEqual(c.prepare_session(c.devices)['body']['machineList'],[])
+        self.assertEqual([v[0] for v in service.calls],['login/verifyAccessTicket','user/getDeviceInfo'])
+        self.assertFalse(c.session_recovery_attempted)
+
+    def test_expired_ticket_relogs_in_once_and_keeps_pending_disconnect(self):
+        state=dict(STATE,pendingConnectId='unfinished',loginUid='old-login')
+        c,service=client([{'errorCode':'401'},ok({'accessTicket':'fresh-ticket'}),
+                         ok({'accessToken':'fresh-token'}),ok({'machineList':[]})],state)
+        c.config['auth']={'username':'test-user','password':'test-password'}
+        events=[];c.prepare_session(c.devices,on_recovery=events.append)
+        self.assertEqual(events,['started','success'])
+        self.assertTrue(c.session_recovered);self.assertTrue(c.session_recovery_attempted)
+        self.assertEqual(c.state['accessTicket'],'fresh-ticket');self.assertEqual(c.state['accessToken'],'fresh-token')
+        self.assertEqual(c.state['deviceUid'],STATE['deviceUid'])
+        self.assertEqual(c.state['pendingConnectId'],'unfinished');self.assertEqual(c.state['loginUid'],'old-login')
+        self.assertNotIn('authRequired',c.state)
+        self.assertEqual([v[0] for v in service.calls],['login/verifyAccessTicket','login/verify',
+                                                     'login/verifyAccessTicket','user/getDeviceInfo'])
+
+    def test_read_401_after_refresh_recovers_once_without_repeated_login(self):
+        c,service=client([ok({'accessToken':'new-token'}),{'errorCode':'401'},
+                         ok({'accessTicket':'fresh-ticket'}),ok({'accessToken':'fresh-token'}),{'errorCode':'401'}],STATE)
+        c.config['auth']={'username':'test-user','password':'test-password'}
+        with self.assertRaises(p.BusinessError) as failure:c.prepare_session(c.devices)
+        self.assertEqual(failure.exception.code,'401');self.assertTrue(c.state['authRequired'])
+        self.assertEqual(sum(path=='login/verify' for path,_ in service.calls),1)
+        self.assertEqual(len(service.calls),5)
+
+    def test_sms_or_account_challenge_requires_user_and_sends_no_sms(self):
+        for code,hint in (('30002009','AUTH_TRUST_REQUIRED'),('30002060','AUTH_TWO_FACTOR_REQUIRED'),
+                          ('10002034','AUTH_ACCOUNT_REQUIRED')):
+            with self.subTest(code=code):
+                c,service=client([{'errorCode':'401'},{'errorCode':code,'body':{'code':'PRIVATE'}}],STATE)
+                c.config['auth']={'username':'test-user','password':'test-password'}
+                with self.assertRaises(p.AuthenticationRequired) as failure:c.prepare_session()
+                self.assertEqual(failure.exception.diagnostic_code,hint)
+                self.assertNotIn('PRIVATE',str(failure.exception))
+                self.assertEqual([v[0] for v in service.calls],['login/verifyAccessTicket','login/verify'])
+                self.assertTrue(c.state['authRequired']);self.assertFalse(c.session_recovered)
+
+    def test_sms_only_session_cannot_recover_without_password(self):
+        c,service=client([{'errorCode':'401'}],STATE)
+        c.config['auth']={'mobile':'test-mobile'}
+        with self.assertRaises(p.AuthenticationRequired) as failure:c.prepare_session()
+        self.assertEqual(failure.exception.diagnostic_code,'AUTH_CREDENTIALS_REQUIRED')
+        self.assertEqual(len(service.calls),1);self.assertEqual(c.state['accessTicket'],STATE['accessTicket'])
+
+    def test_bad_password_or_non_401_is_never_retried(self):
+        c,service=client([{'errorCode':'401'},{'errorCode':'30001004'}],STATE)
+        c.config['auth']={'username':'test-user','password':'wrong-password'}
+        with self.assertRaises(p.BusinessError):c.prepare_session()
+        self.assertEqual(len(service.calls),2);self.assertTrue(c.state['authRequired'])
+        c,service=client([{'errorCode':'500'}],STATE)
+        with self.assertRaises(p.BusinessError):c.prepare_session()
+        self.assertEqual(len(service.calls),1);self.assertFalse(c.session_recovery_attempted)
+
+    def test_session_identity_mismatch_prevents_password_recovery(self):
+        c,service=client([],dict(STATE,deviceUid='another-device'))
+        with self.assertRaises(p.ProtocolError):c.prepare_session()
+        self.assertEqual(service.calls,[])
+
+    def test_connect_once_persists_recovered_ticket_and_connects_only_once(self):
+        machine={'machineId':'M1','originCompanyCode':'ZTE'}
+        c,_=client([{'errorCode':'401'},ok({'accessTicket':'fresh-ticket'}),
+                    ok({'accessToken':'fresh-token'}),ok({'machineList':[machine]})],STATE)
+        c.config['auth']={'username':'test-user','password':'test-password'}
+        c.snapshot=Mock(return_value={});c.record_device=Mock();c.session_status=Mock()
+        def report(machine):c.state['pendingConnectId']='connection-id';return 'connection-id'
+        c.machine_connected=Mock(side_effect=report)
+        def gateway(*args,**kwargs):
+            kwargs['on_connected']()
+            return {'controlSessionCompleted':True,'desktopProtocolConnected':True,'controlHoldSeconds':15}
+        with tempfile.TemporaryDirectory() as temp:
+            root=pathlib.Path(temp);config=root/'account.local.json';session=root/'session.local.json'
+            p.save_json(config,c.config);p.save_json(session,STATE)
+            with patch.object(sys,'argv',['connect_once.py','--config',str(config),'--session',str(session)]),\
+                 patch.object(p,'DATA_DIR',root),patch.object(p,'Client',return_value=c),\
+                 patch.object(z,'fetch_parameters',return_value={}),patch.object(g,'connection_options',return_value={}),\
+                 patch.object(g,'run_gateway',side_effect=gateway) as run,contextlib.redirect_stdout(io.StringIO()) as output:
+                self.assertEqual(connection.main(),0)
+            run.assert_called_once();c.machine_connected.assert_called_once()
+            c.session_status.assert_any_call('connection-id',False)
+            saved=p.load_json(session);self.assertEqual(saved['accessTicket'],'fresh-ticket')
+            self.assertNotIn('pendingConnectId',saved);self.assertNotIn('fresh-ticket',output.getvalue())
+            result=p.load_json(next((root/'live').glob('*-connect-once/result.local.json')))
+            self.assertTrue(result['sessionRecovered']);self.assertFalse(result['authenticationRequired'])
+
+    def test_connect_once_challenge_persists_expiry_and_never_opens_desktop(self):
+        c,_=client([{'errorCode':'401'},{'errorCode':'30002009','body':{'code':'PRIVATE_CHALLENGE'}}],STATE)
+        c.config['auth']={'username':'test-user','password':'test-password'};c.snapshot=Mock(return_value={})
+        with tempfile.TemporaryDirectory() as temp:
+            root=pathlib.Path(temp);config=root/'account.local.json';session=root/'session.local.json'
+            p.save_json(config,c.config);p.save_json(session,STATE)
+            with patch.object(sys,'argv',['connect_once.py','--config',str(config),'--session',str(session)]),\
+                 patch.object(p,'DATA_DIR',root),patch.object(p,'Client',return_value=c),\
+                 patch.object(z,'fetch_parameters') as fetch,patch.object(g,'run_gateway') as run,\
+                 contextlib.redirect_stdout(io.StringIO()) as output:
+                self.assertEqual(connection.main(),1)
+            fetch.assert_not_called();run.assert_not_called()
+            self.assertTrue(p.load_json(session)['authRequired'])
+            result=p.load_json(next((root/'live').glob('*-connect-once/result.local.json')))
+            self.assertEqual(result['diagnosticCode'],'AUTH_TRUST_REQUIRED');self.assertEqual(result['errorCode'],'30002009')
+            self.assertTrue(result['authenticationRequired']);self.assertNotIn('PRIVATE_CHALLENGE',output.getvalue())
 
 if __name__=='__main__':unittest.main(verbosity=2)
