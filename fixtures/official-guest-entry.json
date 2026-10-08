@@ -1,0 +1,972 @@
+{
+  "source": "iOS 3.6.6 isolated ARM64 state/owner-capability handlers",
+  "sdkSha256": "f9e12f4d121b51a186d922793e302d8e5e54e61dd26951b950b2efa118929d73",
+  "credentialSenderIntercepted": true,
+  "cases": [
+    {
+      "name": "alreadyLoggedOn",
+      "serverType": "sy",
+      "autoLogin": true,
+      "policyCapability": false,
+      "settings": {
+        "--user-mode": "0"
+      },
+      "stages": [
+        {
+          "inputGuestState": 1,
+          "events": [
+            {
+              "call": "vm_state_callback",
+              "value": 0
+            },
+            {
+              "call": "vapp_token_helper"
+            },
+            {
+              "call": "mobile_mcloud_token_helper"
+            },
+            {
+              "call": "send_agent_data",
+              "type": 127,
+              "size": 4,
+              "uint32": 3,
+              "payloadHex": "03000000"
+            }
+          ],
+          "storedLockedFlag": 0,
+          "autoLoginFlag": 0
+        }
+      ]
+    },
+    {
+      "name": "notLoggedOn",
+      "serverType": "sy",
+      "autoLogin": true,
+      "policyCapability": false,
+      "settings": {
+        "--user-mode": "0"
+      },
+      "stages": [
+        {
+          "inputGuestState": 0,
+          "events": [
+            {
+              "call": "vm_state_callback",
+              "value": 1
+            },
+            {
+              "call": "password_login_sender"
+            }
+          ],
+          "storedLockedFlag": 1,
+          "autoLoginFlag": 0
+        }
+      ]
+    },
+    {
+      "name": "repeatedLoggedOn",
+      "serverType": "sy",
+      "autoLogin": true,
+      "policyCapability": false,
+      "settings": {
+        "--user-mode": "0"
+      },
+      "stages": [
+        {
+          "inputGuestState": 1,
+          "events": [
+            {
+              "call": "vm_state_callback",
+              "value": 0
+            },
+            {
+              "call": "vapp_token_helper"
+            },
+            {
+              "call": "mobile_mcloud_token_helper"
+            },
+            {
+              "call": "send_agent_data",
+              "type": 127,
+              "size": 4,
+              "uint32": 3,
+              "payloadHex": "03000000"
+            }
+          ],
+          "storedLockedFlag": 0,
+          "autoLoginFlag": 0
+        },
+        {
+          "inputGuestState": 1,
+          "events": [
+            {
+              "call": "vm_state_callback",
+              "value": 0
+            },
+            {
+              "call": "vapp_token_helper"
+            },
+            {
+              "call": "mobile_mcloud_token_helper"
+            },
+            {
+              "call": "send_agent_data",
+              "type": 127,
+              "size": 4,
+              "uint32": 3,
+              "payloadHex": "03000000"
+            }
+          ],
+          "storedLockedFlag": 0,
+          "autoLoginFlag": 0
+        }
+      ]
+    },
+    {
+      "name": "loggedOnThenState0",
+      "serverType": "sy",
+      "autoLogin": true,
+      "policyCapability": false,
+      "settings": {
+        "--user-mode": "0"
+      },
+      "stages": [
+        {
+          "inputGuestState": 1,
+          "events": [
+            {
+              "call": "vm_state_callback",
+              "value": 0
+            },
+            {
+              "call": "vapp_token_helper"
+            },
+            {
+              "call": "mobile_mcloud_token_helper"
+            },
+            {
+              "call": "send_agent_data",
+              "type": 127,
+              "size": 4,
+              "uint32": 3,
+              "payloadHex": "03000000"
+            }
+          ],
+          "storedLockedFlag": 0,
+          "autoLoginFlag": 0
+        },
+        {
+          "inputGuestState": 0,
+          "events": [
+            {
+              "call": "vm_state_callback",
+              "value": 1
+            },
+            {
+              "call": "password_login_sender"
+            }
+          ],
+          "storedLockedFlag": 1,
+          "autoLoginFlag": 0
+        }
+      ]
+    },
+    {
+      "name": "capabilitiesThenLoggedOn",
+      "serverType": "sy",
+      "autoLogin": true,
+      "policyCapability": false,
+      "settings": {
+        "--user-mode": "0"
+      },
+      "stages": [
+        {
+          "inputGuestState": "capabilities",
+          "events": [
+            {
+              "call": "dfs_or_roaming_helper_stub"
+            },
+            {
+              "call": "password_login_sender"
+            }
+          ],
+          "storedLockedFlag": 0,
+          "autoLoginFlag": 0
+        },
+        {
+          "inputGuestState": 1,
+          "events": [
+            {
+              "call": "vm_state_callback",
+              "value": 0
+            },
+            {
+              "call": "vapp_token_helper"
+            },
+            {
+              "call": "mobile_mcloud_token_helper"
+            },
+            {
+              "call": "send_agent_data",
+              "type": 127,
+              "size": 4,
+              "uint32": 3,
+              "payloadHex": "03000000"
+            }
+          ],
+          "storedLockedFlag": 0,
+          "autoLoginFlag": 0
+        }
+      ]
+    },
+    {
+      "name": "loggedOnThenCapabilities",
+      "serverType": "sy",
+      "autoLogin": true,
+      "policyCapability": false,
+      "settings": {
+        "--user-mode": "0"
+      },
+      "stages": [
+        {
+          "inputGuestState": 1,
+          "events": [
+            {
+              "call": "vm_state_callback",
+              "value": 0
+            },
+            {
+              "call": "vapp_token_helper"
+            },
+            {
+              "call": "mobile_mcloud_token_helper"
+            },
+            {
+              "call": "send_agent_data",
+              "type": 127,
+              "size": 4,
+              "uint32": 3,
+              "payloadHex": "03000000"
+            }
+          ],
+          "storedLockedFlag": 0,
+          "autoLoginFlag": 0
+        },
+        {
+          "inputGuestState": "capabilities",
+          "events": [
+            {
+              "call": "dfs_or_roaming_helper_stub"
+            },
+            {
+              "call": "password_login_sender"
+            }
+          ],
+          "storedLockedFlag": 0,
+          "autoLoginFlag": 0
+        }
+      ]
+    },
+    {
+      "name": "nonSyLoggedOnThenCapabilities",
+      "serverType": "common",
+      "autoLogin": true,
+      "policyCapability": false,
+      "settings": {
+        "--user-mode": "0"
+      },
+      "stages": [
+        {
+          "inputGuestState": 1,
+          "events": [
+            {
+              "call": "vm_state_callback",
+              "value": 0
+            },
+            {
+              "call": "vapp_token_helper"
+            },
+            {
+              "call": "mobile_mcloud_token_helper"
+            },
+            {
+              "call": "send_agent_data",
+              "type": 127,
+              "size": 4,
+              "uint32": 3,
+              "payloadHex": "03000000"
+            }
+          ],
+          "storedLockedFlag": 0,
+          "autoLoginFlag": 0
+        },
+        {
+          "inputGuestState": "capabilities",
+          "events": [
+            {
+              "call": "dfs_or_roaming_helper_stub"
+            }
+          ],
+          "storedLockedFlag": 0,
+          "autoLoginFlag": 0
+        }
+      ]
+    },
+    {
+      "name": "lockPolicyCapabilityThenLoggedOn",
+      "serverType": "sy",
+      "autoLogin": true,
+      "policyCapability": true,
+      "settings": {
+        "--user-mode": "0"
+      },
+      "stages": [
+        {
+          "inputGuestState": "capabilities",
+          "events": [
+            {
+              "call": "dfs_or_roaming_helper_stub"
+            },
+            {
+              "call": "password_login_sender"
+            },
+            {
+              "call": "send_agent_data",
+              "type": 120,
+              "size": 4,
+              "uint32": 0,
+              "payloadHex": "00000000"
+            }
+          ],
+          "storedLockedFlag": 0,
+          "autoLoginFlag": 0
+        },
+        {
+          "inputGuestState": 1,
+          "events": [
+            {
+              "call": "vm_state_callback",
+              "value": 0
+            },
+            {
+              "call": "vapp_token_helper"
+            },
+            {
+              "call": "mobile_mcloud_token_helper"
+            },
+            {
+              "call": "send_agent_data",
+              "type": 127,
+              "size": 4,
+              "uint32": 3,
+              "payloadHex": "03000000"
+            }
+          ],
+          "storedLockedFlag": 0,
+          "autoLoginFlag": 0
+        }
+      ]
+    },
+    {
+      "name": "mode7",
+      "serverType": "sy",
+      "autoLogin": true,
+      "policyCapability": true,
+      "settings": {
+        "--user-mode": "7"
+      },
+      "stages": [
+        {
+          "inputGuestState": "capabilities",
+          "events": [
+            {
+              "call": "dfs_or_roaming_helper_stub"
+            },
+            {
+              "call": "password_login_sender"
+            },
+            {
+              "call": "send_agent_data",
+              "type": 120,
+              "size": 4,
+              "uint32": 0,
+              "payloadHex": "00000000"
+            }
+          ],
+          "storedLockedFlag": 0,
+          "autoLoginFlag": 0
+        },
+        {
+          "inputGuestState": 1,
+          "events": [
+            {
+              "call": "vm_state_callback",
+              "value": 0
+            },
+            {
+              "call": "vapp_token_helper"
+            },
+            {
+              "call": "mobile_mcloud_token_helper"
+            },
+            {
+              "call": "send_agent_data",
+              "type": 127,
+              "size": 4,
+              "uint32": 7,
+              "payloadHex": "07000000"
+            }
+          ],
+          "storedLockedFlag": 0,
+          "autoLoginFlag": 0
+        }
+      ]
+    },
+    {
+      "name": "watchMode0",
+      "serverType": "sy",
+      "autoLogin": true,
+      "policyCapability": true,
+      "settings": {
+        "--user-mode": "0",
+        "--watch-mode": "0"
+      },
+      "stages": [
+        {
+          "inputGuestState": "capabilities",
+          "events": [
+            {
+              "call": "dfs_or_roaming_helper_stub"
+            },
+            {
+              "call": "password_login_sender"
+            },
+            {
+              "call": "send_agent_data",
+              "type": 120,
+              "size": 4,
+              "uint32": 0,
+              "payloadHex": "00000000"
+            }
+          ],
+          "storedLockedFlag": 0,
+          "autoLoginFlag": 0
+        },
+        {
+          "inputGuestState": 1,
+          "events": [
+            {
+              "call": "vm_state_callback",
+              "value": 0
+            },
+            {
+              "call": "vapp_token_helper"
+            },
+            {
+              "call": "mobile_mcloud_token_helper"
+            }
+          ],
+          "storedLockedFlag": 0,
+          "autoLoginFlag": 0
+        }
+      ]
+    },
+    {
+      "name": "policyHub1",
+      "serverType": "sy",
+      "autoLogin": true,
+      "policyCapability": true,
+      "settings": {
+        "--user-mode": "0",
+        "--hub-ratio": "1"
+      },
+      "stages": [
+        {
+          "inputGuestState": "capabilities",
+          "events": [
+            {
+              "call": "dfs_or_roaming_helper_stub"
+            },
+            {
+              "call": "password_login_sender"
+            },
+            {
+              "call": "send_agent_data",
+              "type": 120,
+              "size": 4,
+              "uint32": 2,
+              "payloadHex": "02000000"
+            }
+          ],
+          "storedLockedFlag": 0,
+          "autoLoginFlag": 0
+        },
+        {
+          "inputGuestState": 1,
+          "events": [
+            {
+              "call": "vm_state_callback",
+              "value": 0
+            },
+            {
+              "call": "vapp_token_helper"
+            },
+            {
+              "call": "mobile_mcloud_token_helper"
+            },
+            {
+              "call": "send_agent_data",
+              "type": 127,
+              "size": 4,
+              "uint32": 3,
+              "payloadHex": "03000000"
+            }
+          ],
+          "storedLockedFlag": 0,
+          "autoLoginFlag": 0
+        }
+      ]
+    },
+    {
+      "name": "policyPlay1",
+      "serverType": "sy",
+      "autoLogin": true,
+      "policyCapability": true,
+      "settings": {
+        "--user-mode": "0",
+        "--play-lockscreen": "1"
+      },
+      "stages": [
+        {
+          "inputGuestState": "capabilities",
+          "events": [
+            {
+              "call": "dfs_or_roaming_helper_stub"
+            },
+            {
+              "call": "password_login_sender"
+            },
+            {
+              "call": "send_agent_data",
+              "type": 120,
+              "size": 4,
+              "uint32": 1,
+              "payloadHex": "01000000"
+            }
+          ],
+          "storedLockedFlag": 0,
+          "autoLoginFlag": 0
+        },
+        {
+          "inputGuestState": 1,
+          "events": [
+            {
+              "call": "vm_state_callback",
+              "value": 0
+            },
+            {
+              "call": "vapp_token_helper"
+            },
+            {
+              "call": "mobile_mcloud_token_helper"
+            },
+            {
+              "call": "send_agent_data",
+              "type": 127,
+              "size": 4,
+              "uint32": 3,
+              "payloadHex": "03000000"
+            }
+          ],
+          "storedLockedFlag": 0,
+          "autoLoginFlag": 0
+        }
+      ]
+    },
+    {
+      "name": "policyBoth1",
+      "serverType": "sy",
+      "autoLogin": true,
+      "policyCapability": true,
+      "settings": {
+        "--user-mode": "0",
+        "--hub-ratio": "1",
+        "--play-lockscreen": "1"
+      },
+      "stages": [
+        {
+          "inputGuestState": "capabilities",
+          "events": [
+            {
+              "call": "dfs_or_roaming_helper_stub"
+            },
+            {
+              "call": "password_login_sender"
+            },
+            {
+              "call": "send_agent_data",
+              "type": 120,
+              "size": 4,
+              "uint32": 3,
+              "payloadHex": "03000000"
+            }
+          ],
+          "storedLockedFlag": 0,
+          "autoLoginFlag": 0
+        },
+        {
+          "inputGuestState": 1,
+          "events": [
+            {
+              "call": "vm_state_callback",
+              "value": 0
+            },
+            {
+              "call": "vapp_token_helper"
+            },
+            {
+              "call": "mobile_mcloud_token_helper"
+            },
+            {
+              "call": "send_agent_data",
+              "type": 127,
+              "size": 4,
+              "uint32": 3,
+              "payloadHex": "03000000"
+            }
+          ],
+          "storedLockedFlag": 0,
+          "autoLoginFlag": 0
+        }
+      ]
+    },
+    {
+      "name": "policyNonLiteral1",
+      "serverType": "sy",
+      "autoLogin": true,
+      "policyCapability": true,
+      "settings": {
+        "--user-mode": "0",
+        "--hub-ratio": "01",
+        "--play-lockscreen": "true"
+      },
+      "stages": [
+        {
+          "inputGuestState": "capabilities",
+          "events": [
+            {
+              "call": "dfs_or_roaming_helper_stub"
+            },
+            {
+              "call": "password_login_sender"
+            },
+            {
+              "call": "send_agent_data",
+              "type": 120,
+              "size": 4,
+              "uint32": 0,
+              "payloadHex": "00000000"
+            }
+          ],
+          "storedLockedFlag": 0,
+          "autoLoginFlag": 0
+        },
+        {
+          "inputGuestState": 1,
+          "events": [
+            {
+              "call": "vm_state_callback",
+              "value": 0
+            },
+            {
+              "call": "vapp_token_helper"
+            },
+            {
+              "call": "mobile_mcloud_token_helper"
+            },
+            {
+              "call": "send_agent_data",
+              "type": 127,
+              "size": 4,
+              "uint32": 3,
+              "payloadHex": "03000000"
+            }
+          ],
+          "storedLockedFlag": 0,
+          "autoLoginFlag": 0
+        }
+      ]
+    },
+    {
+      "name": "token1",
+      "serverType": "sy",
+      "autoLogin": true,
+      "policyCapability": true,
+      "settings": {
+        "--user-mode": "0",
+        "--accessToken": "synthetic-token",
+        "--token-type": "1"
+      },
+      "stages": [
+        {
+          "inputGuestState": "capabilities",
+          "events": [
+            {
+              "call": "dfs_or_roaming_helper_stub"
+            },
+            {
+              "call": "password_login_sender"
+            },
+            {
+              "call": "send_agent_data",
+              "type": 120,
+              "size": 4,
+              "uint32": 0,
+              "payloadHex": "00000000"
+            }
+          ],
+          "storedLockedFlag": 0,
+          "autoLoginFlag": 0
+        },
+        {
+          "inputGuestState": 1,
+          "events": [
+            {
+              "call": "vm_state_callback",
+              "value": 0
+            },
+            {
+              "call": "vapp_token_helper"
+            },
+            {
+              "call": "send_agent_data",
+              "type": 124,
+              "size": 512,
+              "uint32": null,
+              "payloadHex": "73796e7468657469632d746f6b656e0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+            },
+            {
+              "call": "mobile_mcloud_token_helper"
+            },
+            {
+              "call": "send_agent_data",
+              "type": 142,
+              "size": 20,
+              "uint32": null,
+              "payloadHex": "0100100073796e7468657469632d746f6b656e00"
+            },
+            {
+              "call": "send_agent_data",
+              "type": 127,
+              "size": 4,
+              "uint32": 3,
+              "payloadHex": "03000000"
+            }
+          ],
+          "storedLockedFlag": 0,
+          "autoLoginFlag": 0
+        }
+      ]
+    },
+    {
+      "name": "token0",
+      "serverType": "sy",
+      "autoLogin": true,
+      "policyCapability": true,
+      "settings": {
+        "--user-mode": "0",
+        "--accessToken": "synthetic-token",
+        "--token-type": "0"
+      },
+      "stages": [
+        {
+          "inputGuestState": "capabilities",
+          "events": [
+            {
+              "call": "dfs_or_roaming_helper_stub"
+            },
+            {
+              "call": "password_login_sender"
+            },
+            {
+              "call": "send_agent_data",
+              "type": 120,
+              "size": 4,
+              "uint32": 0,
+              "payloadHex": "00000000"
+            }
+          ],
+          "storedLockedFlag": 0,
+          "autoLoginFlag": 0
+        },
+        {
+          "inputGuestState": 1,
+          "events": [
+            {
+              "call": "vm_state_callback",
+              "value": 0
+            },
+            {
+              "call": "vapp_token_helper"
+            },
+            {
+              "call": "send_agent_data",
+              "type": 124,
+              "size": 512,
+              "uint32": null,
+              "payloadHex": "73796e7468657469632d746f6b656e0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+            },
+            {
+              "call": "mobile_mcloud_token_helper"
+            },
+            {
+              "call": "send_agent_data",
+              "type": 127,
+              "size": 4,
+              "uint32": 3,
+              "payloadHex": "03000000"
+            }
+          ],
+          "storedLockedFlag": 0,
+          "autoLoginFlag": 0
+        }
+      ]
+    },
+    {
+      "name": "watchToken1",
+      "serverType": "sy",
+      "autoLogin": true,
+      "policyCapability": true,
+      "settings": {
+        "--user-mode": "0",
+        "--watch-mode": "0",
+        "--accessToken": "synthetic-token",
+        "--token-type": "1"
+      },
+      "stages": [
+        {
+          "inputGuestState": "capabilities",
+          "events": [
+            {
+              "call": "dfs_or_roaming_helper_stub"
+            },
+            {
+              "call": "password_login_sender"
+            },
+            {
+              "call": "send_agent_data",
+              "type": 120,
+              "size": 4,
+              "uint32": 0,
+              "payloadHex": "00000000"
+            }
+          ],
+          "storedLockedFlag": 0,
+          "autoLoginFlag": 0
+        },
+        {
+          "inputGuestState": 1,
+          "events": [
+            {
+              "call": "vm_state_callback",
+              "value": 0
+            },
+            {
+              "call": "vapp_token_helper"
+            },
+            {
+              "call": "send_agent_data",
+              "type": 124,
+              "size": 512,
+              "uint32": null,
+              "payloadHex": "73796e7468657469632d746f6b656e0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+            },
+            {
+              "call": "mobile_mcloud_token_helper"
+            },
+            {
+              "call": "send_agent_data",
+              "type": 142,
+              "size": 20,
+              "uint32": null,
+              "payloadHex": "0100100073796e7468657469632d746f6b656e00"
+            }
+          ],
+          "storedLockedFlag": 0,
+          "autoLoginFlag": 0
+        }
+      ]
+    },
+    {
+      "name": "token512",
+      "serverType": "sy",
+      "autoLogin": true,
+      "policyCapability": true,
+      "settings": {
+        "--user-mode": "0",
+        "--accessToken": "TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT",
+        "--token-type": "1"
+      },
+      "stages": [
+        {
+          "inputGuestState": "capabilities",
+          "events": [
+            {
+              "call": "dfs_or_roaming_helper_stub"
+            },
+            {
+              "call": "password_login_sender"
+            },
+            {
+              "call": "send_agent_data",
+              "type": 120,
+              "size": 4,
+              "uint32": 0,
+              "payloadHex": "00000000"
+            }
+          ],
+          "storedLockedFlag": 0,
+          "autoLoginFlag": 0
+        },
+        {
+          "inputGuestState": 1,
+          "events": [
+            {
+              "call": "vm_state_callback",
+              "value": 0
+            },
+            {
+              "call": "vapp_token_helper"
+            },
+            {
+              "call": "send_agent_data",
+              "type": 124,
+              "size": 512,
+              "uint32": null,
+              "payloadHex": "5454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545400"
+            },
+            {
+              "call": "mobile_mcloud_token_helper"
+            },
+            {
+              "call": "send_agent_data",
+              "type": 142,
+              "size": 517,
+              "uint32": null,
+              "payloadHex": "01000102545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545454545400"
+            },
+            {
+              "call": "send_agent_data",
+              "type": 127,
+              "size": 4,
+              "uint32": 3,
+              "payloadHex": "03000000"
+            }
+          ],
+          "storedLockedFlag": 0,
+          "autoLoginFlag": 0
+        }
+      ]
+    }
+  ]
+}

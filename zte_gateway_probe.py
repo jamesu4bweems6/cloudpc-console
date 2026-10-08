@@ -13,7 +13,7 @@ from cryptography.hazmat.primitives.serialization import load_der_public_key
 from cryptography.hazmat.primitives.asymmetric import rsa
 import cloudpc_protocol as p
 from zte_connection import HERE
-from zte_guest_agent import GuestAgent,login_payload,guest_credentials
+from zte_guest_agent import GuestAgent,login_payload,guest_credentials,native_integer
 
 def read_exact(sock,n):
     out=bytearray()
@@ -49,11 +49,19 @@ def connection_options(machine,value=None):
         raise p.ConnectionError('DESKTOP_PARAMETERS_PENDING')
     args=shlex.split(value['connectStr'])
     options={}
+    def value(name):
+        index=args.index(name)+1
+        if index>=len(args) or args[index].startswith('--') or args[index] in ('-p','-h','-k'):
+            raise p.ProtocolError('桌面选项缺少值')
+        return args[index]
     for name in ['-p','-h','-k','--vmid','--type','--proxy-sport']:
         if args.count(name)!=1:raise p.ProtocolError('必要桌面选项不唯一')
-        options[name]=args[args.index(name)+1]
-    for name in ('--al','--server-type'):
-        if args.count(name)==1:options[name]=args[args.index(name)+1]
+        options[name]=value(name)
+    for name in ('--al','--server-type','--user-mode','--watch-mode','--hub-ratio',
+                 '--play-lockscreen','--logon-noAD','--logon-type','--uactoken','--accessToken','--token-type'):
+        count=args.count(name)
+        if count>1:raise p.ProtocolError('桌面控制选项不唯一')
+        if count:options[name]=value(name)
     if options['--vmid']!=machine['machineId'] or options['--type']!='ice':
         raise p.ProtocolError('仅支持当前本人 ICE 桌面参数')
     return options
@@ -91,7 +99,7 @@ def control_session(sock,mini,directory,result,hold_seconds,on_connected,options
         ('baseVendor','cloudpc-console'),('baseProduct','protocol'),('baseModel',platform.machine()),
         ('baseOsType',platform.system()),('baseOsVersion',platform.release()),('baseSoftVersion','3.6.6'),
         ('baseSN',options.get('_terminal_serial','')),('baseIP',''),('clientIPv4',''),('clientMac','')))
-    agent=GuestAgent(send,result,options['-k'],options.get('_guest_user'),options.get('_guest_password'),options.get('--al')=='1',options.get('_login_key'),terminal)
+    agent=GuestAgent(send,result,options['-k'],options.get('_guest_user'),options.get('_guest_password'),options.get('--al')=='1',options.get('_login_key'),terminal,server_type=options.get('--server-type','common'),settings=options)
     agent.tokens=struct.unpack_from('<I',init,20)[0]
     if struct.unpack_from('<I',init,16)[0]:agent.start()
     # main_handle_init!0xe365fc requests version; 0xe3662c attaches channels.
@@ -154,7 +162,7 @@ def main_channel(sock,options,serial,directory,result,on_connected=None,hold_sec
     struct.pack_into('<I',body,27,20)
     # send_link!0xde4290 defaults watch-mode to 1, stored at 0xde48c0.
     # Leaving this byte zero differs from a normal client entry.
-    body[32]=1
+    body[32]=(native_integer(options['--watch-mode'])&0xff) if '--watch-mode' in options else 1
     ticket=options['-k'].encode('ascii')
     if len(ticket)!=8:raise p.ProtocolError('当前样本要求 8 字节 ICE 票据')
     body[34:42]=ticket
@@ -163,7 +171,8 @@ def main_channel(sock,options,serial,directory,result,on_connected=None,hold_sec
     body[79:95]=serial
     # init_logon_info_rsa_encrypt_cap!0xe13780 offers bit13 when the native
     # login body fits RSA2048 OAEP (214 bytes). Keep other channels separate.
-    login_size=len(login_payload(options['-k'],options['_guest_user'],options['_guest_password'])) if options.get('--al')=='1' else 0
+    needs_login=options.get('--al')=='1' or options.get('--server-type')=='sy'
+    login_size=len(login_payload(options['-k'],options['_guest_user'],options['_guest_password'])) if needs_login else 0
     caps=struct.pack('<I',8)
     if 0<login_size<=214:
         struct.pack_into('<I',body,10,1);caps+=struct.pack('<I',1<<13)

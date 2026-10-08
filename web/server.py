@@ -23,7 +23,9 @@ RESULT_FIELDS+=('guestAgentConnected','guestCapabilitiesReceived','guestLogonSta
                 'displayChannelAuthenticated','inputsChannelAuthenticated','cursorChannelAuthenticated','displayMessageReceived',
                 'desktopSurfaceCreated','desktopVideoStreamCreated','desktopFrameReceived','desktopSessionEntered',
                 'desktopEntryWaitSeconds','powerOnAccepted','powerOnCompleted','legacyMainOnly','legacyDisplayOnly',
-                'systemEntryConfirmed','desktopDisplayReady','guestLoginRsaNegotiated','guestLoginEncryption')
+                'systemEntryConfirmed','desktopDisplayReady','guestLoginRsaNegotiated','guestLoginEncryption',
+                'guestLoginAttempts','guestLoginStages','guestLockPolicySent','guestLockPolicyFlags',
+                'guestUserMode','guestAgentVersion','guestLockDisconnectReply')
 
 def entered_system(value):
     return bool(value.get('systemEntryConfirmed') and value.get('desktopFrameReceived')
