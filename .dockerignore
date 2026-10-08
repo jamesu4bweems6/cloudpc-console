@@ -6,6 +6,7 @@
 !connect_once.py
 !zte_connection.py
 !zte_gateway_probe.py
+!zte_guest_agent.py
 !live_validate.py
 !keepalive_loop.py
 !sample-profile.json

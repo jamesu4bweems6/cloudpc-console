@@ -60,6 +60,14 @@ class WebChecks(unittest.TestCase):
         self.assertFalse(self.console.loop);self.assertIsNone(self.console.next_run)
         self.assertFalse(self.console.busy)
 
+    def test_power_connect_uses_explicit_power_on_flow(self):
+        with patch.object(w.threading,'Thread'):
+            self.console.start_job('power-connect',{})
+        with patch.object(self.console,'connect') as connect:
+            self.console.worker('power-connect',{})
+        connect.assert_called_once_with(power_on=True)
+        self.assertFalse(self.console.busy)
+
     def test_connection_diagnostics_use_fixed_hints_without_raw_exceptions(self):
         result=w.safe_result({'success':False,'errorType':'SSLError','diagnosticCode':'CAG_TLS_NO_PIN',
                               'failedStage':'connection_parameters','errorHint':'TOKEN_PRIVATE','rawError':'PASSWORD_PRIVATE'})
@@ -79,8 +87,15 @@ class WebChecks(unittest.TestCase):
         try:self.assertTrue(restarted.state()['authenticationRequired'])
         finally:restarted.close()
 
+    def test_old_authentication_success_is_not_presented_as_desktop_entry(self):
+        old=w.safe_result({'success':True,'desktopProtocolConnected':True})
+        self.assertFalse(old['success']);self.assertTrue(old['legacyMainOnly'])
+        current=w.safe_result({'success':True,'desktopSessionEntered':True,'desktopFrameReceived':True,'guestLogonState':0})
+        self.assertTrue(current['success']);self.assertTrue(current['desktopFrameReceived'])
+        self.assertEqual(current['guestLogonState'],0)
+
     def test_connection_password_recovery_keeps_schedule_running(self):
-        result={'stage':'connect-once','success':True,'sessionRecoveryAttempted':True,'sessionRecovered':True}
+        result={'stage':'connect-once','success':True,'desktopSessionEntered':True,'sessionRecoveryAttempted':True,'sessionRecovered':True}
         proc=Mock();proc.stdout=iter([json.dumps({'stage':'session-recovery','status':'started'}),
                                    json.dumps({'stage':'session-recovery','status':'success'}),json.dumps(result)])
         proc.returncode=0;self.console.loop=True

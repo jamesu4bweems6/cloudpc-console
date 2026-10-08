@@ -20,7 +20,7 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
-    stop_grace_period: 120s
+    stop_grace_period: 330s
     logging:
       driver: json-file
       options:

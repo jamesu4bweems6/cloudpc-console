@@ -30,6 +30,12 @@ class ProtocolError(Exception):
     pass
 
 CONNECTION_HINTS = {
+    'GUEST_CREDENTIALS_MISSING': '来宾未登录且连接响应未提供完整来宾凭据。',
+    'GUEST_AGENT_DISCONNECTED': '来宾代理已断开，未完成进入系统。',
+    'DESKTOP_ENTRY_UNCONFIRMED': '仅完成通道认证，未收到有效桌面画面；本次不计为进入系统。',
+    'GUEST_RSA_LINK_UNSUPPORTED': '网关要求尚未适配的 RSA2048 来宾登录扩展，已停止。',
+    'DESKTOP_POWER_ON_REQUIRED': '云电脑已关机，请先开机后再连接。',
+    'DESKTOP_PARAMETERS_PENDING': '桌面连接参数尚未就绪，请稍后再连接。',
     'AUTH_CREDENTIALS_REQUIRED': '登录票据已失效；未保存账号密码，请在网页重新登录。仅短信登录无法自动续登。',
     'AUTH_TRUST_REQUIRED': '自动续登需要设备可信短信验证，请点击密码登录并完成验证码验证。',
     'AUTH_TWO_FACTOR_REQUIRED': '自动续登需要双因素短信验证，请点击密码登录并完成验证码验证。',
@@ -393,6 +399,18 @@ class Client:
         status = self.post('user/getDesktopStatus', {'accessToken': self.token,
                           'instanceIdList': instances, 'resourcePoolUidList': pools})
         return {'observedAt': dt.datetime.now(dt.timezone.utc).isoformat(), 'policy': policy, 'status': status}
+
+    def power_on(self, machine):
+        """Only power on the exact configured own, nonpooled ZTE target."""
+        if (machine.get('machineId') != self.config['target'].get('machineId') or
+            machine.get('originCompanyCode') != 'ZTE' or machine.get('resourcePoolUid') or
+            machine.get('machineStatus') != 'shutdown' or not machine.get('machineName')):
+            raise ProtocolError('开机目标或状态不符合当前本人桌面')
+        # Dart outer.dart::setMachineOperate!0x5eac84 maps powerOn to available.
+        return self.post('resource/operate', {'accessToken':self.token, 'operate':'available',
+            'machineId':machine['machineId'], 'machineName':machine['machineName'],
+            'deviceUid':self.common['deviceUid'], 'sdkType':'1',
+            'sdkVersion':'V1.2.260108'})
 
 def init_config(path):
     path = pathlib.Path(path)

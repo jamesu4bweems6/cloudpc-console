@@ -43,7 +43,7 @@ class ContainerRuntimeChecks(unittest.TestCase):
         self.assertEqual(json.loads(result.stdout),[str(self.data),str(self.data/'live')])
 
     def test_connection_child_inherits_data_config_and_session(self):
-        proc=Mock();proc.stdout=iter([json.dumps({'stage':'connect-once','success':True})]);proc.returncode=0
+        proc=Mock();proc.stdout=iter([json.dumps({'stage':'connect-once','success':True,'desktopSessionEntered':True})]);proc.returncode=0
         with patch.object(w.subprocess,'Popen',return_value=proc) as spawn:self.console.connect()
         args,kwargs=spawn.call_args
         self.assertEqual(kwargs['env']['CLOUDPC_DATA_DIR'],str(self.data))
@@ -126,7 +126,7 @@ class ContainerRuntimeChecks(unittest.TestCase):
         self.console.loop=True;self.console.next_run=123;job=Mock();self.console.job=job
         self.console.close()
         self.assertFalse(self.console.loop);self.assertIsNone(self.console.next_run)
-        job.join.assert_called_once_with(timeout=85)
+        job.join.assert_called_once_with(timeout=300)
         self.assertTrue(self.console.stopping)
         with self.assertRaises(ValueError):self.console.start_job('connect')
         with self.assertRaises(ValueError):self.console.set_loop(True)

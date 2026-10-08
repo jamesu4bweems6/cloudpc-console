@@ -20,7 +20,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: python -m pip install -r test-requirements.txt
-      - run: python -X utf8 -m unittest test_protocol test_desktop -v
+      - run: python -X utf8 -m unittest test_protocol test_desktop test_guest_agent -v
       - run: python -X utf8 -m unittest discover -s web -p 'test_*.py' -v
 
   docker-startup:

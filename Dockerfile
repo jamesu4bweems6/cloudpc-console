@@ -11,7 +11,7 @@ RUN groupadd --gid 10001 cloudpc \
     && useradd --uid 10001 --gid cloudpc --no-create-home cloudpc \
     && mkdir -p /data/live \
     && chown -R cloudpc:cloudpc /data
-COPY cloudpc_protocol.py connect_once.py zte_connection.py zte_gateway_probe.py live_validate.py keepalive_loop.py sample-profile.json zte-sample-profile.json ./
+COPY cloudpc_protocol.py connect_once.py zte_connection.py zte_gateway_probe.py zte_guest_agent.py live_validate.py keepalive_loop.py sample-profile.json zte-sample-profile.json ./
 COPY web/server.py web/index.html web/app.js web/style.css ./web/
 COPY gateway-pins/ ./gateway-pins/
 USER 10001:10001

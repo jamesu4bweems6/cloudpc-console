@@ -1,5 +1,5 @@
 """One real ZTE ICE connection with fresh parameters and connected CEM reports."""
-import argparse,json,pathlib,sys,datetime as dt
+import argparse,json,pathlib,sys,datetime as dt,time
 import requests
 import cloudpc_protocol as p
 import zte_connection as z
@@ -11,6 +11,7 @@ def main():
     ap.add_argument('--config',type=pathlib.Path,default=p.DATA_DIR/'account.local.json')
     ap.add_argument('--session',type=pathlib.Path,default=p.DATA_DIR/'session.local.json')
     ap.add_argument('--hold-seconds',type=int,default=15,choices=range(5,61),metavar='5..60')
+    ap.add_argument('--power-on',action='store_true',help='开机当前本人已关机的非资源池桌面并等待最多 120 秒')
     args=ap.parse_args()
     config=p.load_json(args.config)
     state=p.load_json(args.session)
@@ -39,9 +40,29 @@ def main():
         machine=matches[0]
         p.save_json(directory/'devices.local.json',devices)
         phase='snapshot_before';p.save_json(directory/'before.local.json',client.snapshot(config['target']))
+        if machine.get('machineStatus')=='shutdown':
+            if not args.power_on:raise p.ConnectionError('DESKTOP_POWER_ON_REQUIRED')
+            phase='power_on';client.power_on(machine);result['powerOnAccepted']=True
+            print(json.dumps({'stage':'power-on','status':'accepted'}),flush=True)
+            for _ in range(24):
+                time.sleep(5)
+                devices=client.devices()
+                matches=[m for m in devices['body']['machineList'] if m.get('machineId')==config['target'].get('machineId')]
+                if len(matches)!=1 or matches[0].get('originCompanyCode')!='ZTE':raise p.ProtocolError('开机后目标不一致')
+                machine=matches[0]
+                if machine.get('machineStatus')=='available':break
+            else:raise p.ProtocolError('等待开机超时')
+            result['powerOnCompleted']=True
         phase='session_registration';client.record_device();client.session_status()
         phase='connection_parameters'
         value=z.fetch_parameters(machine,directory/'parameters')
+        if result.get('powerOnCompleted'):
+            for attempt in range(3):
+                if value.get('connectStr') or not value.get('success') or value.get('result') not in ('0',0):break
+                delay=value.get('asyncQueryTimeInterval',25)
+                delay=max(5,min(30,delay)) if isinstance(delay,int) else 25
+                time.sleep(delay)
+                value=z.fetch_parameters(machine,directory/('parameters-wait-'+str(attempt)))
         phase='parameter_decode'
         options=g.connection_options(machine,value)
         phase='ice_pin_check'
@@ -54,12 +75,12 @@ def main():
             p.save_json(args.session,client.state)
             client.session_status(connect_id,True)
             result['connectedReportAccepted']=True
-            print('桌面认证成功，在线连接上报已接受。',flush=True)
+            print('桌面画面已确认，在线连接上报已接受。',flush=True)
         phase='desktop_channel'
         result.update(g.run_gateway(machine,options,directory/'desktop',
                                    on_connected=connected,hold_seconds=args.hold_seconds,pin=pin))
         result['stage']='connect-once'
-        result['success']=bool(result.get('controlSessionCompleted') and result.get('connectedReportAccepted'))
+        result['success']=bool(result.get('desktopSessionEntered') and result.get('controlSessionCompleted') and result.get('connectedReportAccepted'))
         if not result['success']:result['failedStage']=phase
         if str(result.get('errorCode'))=='401':client.state['authRequired']=True
     except (p.ProtocolError,requests.RequestException,OSError,ValueError,KeyError) as exc:
@@ -85,6 +106,7 @@ def main():
         result.update(sessionRecoveryAttempted=client.session_recovery_attempted,
                       sessionRecovered=client.session_recovered,
                       authenticationRequired=bool(client.state.get('authRequired')))
+        result['success']=bool(result['success'] and result.get('disconnectedReportAccepted'))
         result['finishedAt']=dt.datetime.now(dt.timezone.utc).isoformat()
         p.save_json(directory/'result.local.json',result)
         print(json.dumps(result,ensure_ascii=False))

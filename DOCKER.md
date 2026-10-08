@@ -64,7 +64,7 @@ docker compose up -d --build
 - `docker compose down` 停止并删除容器，数据卷保留；`docker compose up -d --build` 重建镜像并继续使用原数据。**`docker compose down -v` 会删除数据卷。**
 - `docker compose logs -f --tail=100` 查看服务日志；`docker compose ps` 查看启动和健康检查状态。健康检查仅检查本地 HTTP 服务，不发云电脑连接请求。
 - 容器启动或重启后周期连接默认关闭，需要在网页手动开启。关闭页面后服务继续运行。周期连接失败即停止；重启策略不会自动恢复周期任务。
-- `docker compose stop` 发出终止信号，停止后续轮次并给当前操作最多85秒完成；Compose 给进程120秒退出时间。建议在页面停止周期连接、等待当前任务完成后再维护。
+- `docker compose stop` 发出终止信号，停止后续轮次并给当前操作最多300秒完成；Compose 给进程330秒退出时间。建议在页面停止周期连接、等待当前任务完成后再维护。
 - 服务以 UID/GID 10001 运行，只有数据卷和临时目录可写。容器端口发布到宿主机所有IPv4网卡。
 - 关机期限是否被延续仍需跨原始1–2天观察验证；容器健康或连接成功均不能代替此验证。
 

@@ -19,9 +19,15 @@ RESULT_FIELDS=('success','desktopProtocolConnected','gatewayAuthenticated','desk
  'mainInitReceived','channelsListReceived','controlSessionCompleted','controlHoldSeconds',
  'connectedReportAccepted','disconnectedReportAccepted','ticketRefreshAccepted','startedAt','finishedAt','errorCode','errorType',
  'diagnosticCode','failedStage','sessionRecoveryAttempted','sessionRecovered','authenticationRequired')
+RESULT_FIELDS+=('guestAgentConnected','guestCapabilitiesReceived','guestLogonState','guestLoginSent','guestSessionEntered',
+                'displayChannelAuthenticated','inputsChannelAuthenticated','cursorChannelAuthenticated','displayMessageReceived',
+                'desktopSurfaceCreated','desktopVideoStreamCreated','desktopFrameReceived','desktopSessionEntered',
+                'desktopEntryWaitSeconds','powerOnAccepted','powerOnCompleted','legacyMainOnly')
 def safe_result(value):
     result={k:value[k] for k in RESULT_FIELDS if k in value}
-    if not value.get('success'):result['errorHint']=p.connection_failure_message(result)
+    if value.get('success') and not value.get('desktopSessionEntered'):
+        result.update(success=False,legacyMainOnly=True,errorHint='旧版仅确认主通道认证，未验证进入系统。')
+    elif not value.get('success'):result['errorHint']=p.connection_failure_message(result)
     return result
 def safe_machine(value):
     return {k:value.get(k) for k in ('machineId','machineName','machineStatus','originCompanyCode','resourceType','instanceId','resourcePoolUid')}
@@ -119,7 +125,7 @@ class Console:
             if action=='sms-send':self.sms_at=time.time()
             if self.stopping:raise ValueError('服务正在停止')
             self.busy=True;self.action=action
-            self.event({'connect':'开始单次桌面连接。','devices':'正在刷新云电脑状态。','password':'正在验证账号密码。',
+            self.event({'connect':'开始单次桌面连接。','power-connect':'正在开机并进入系统。','devices':'正在刷新云电脑状态。','password':'正在验证账号密码。',
                         'sms-send':'正在请求登录验证码。','sms-login':'正在验证登录验证码。','challenge':'正在完成设备验证。'}[action])
             self.job=threading.Thread(target=self.worker,args=(action,data),daemon=True)
             self.job.start()
@@ -151,7 +157,7 @@ class Console:
     def worker(self,action,data):
         client=None
         try:
-            if action=='connect':self.connect()
+            if action in ('connect','power-connect'):self.connect(power_on=action=='power-connect')
             else:
                 client=self.client();auth=client.config['auth']
                 if action=='devices':
@@ -185,7 +191,7 @@ class Console:
                 if code=='401':client.state['authRequired']=True
                 p.save_json(self.session_file,client.state)
             self.event(message,'error')
-            if action=='connect':
+            if action in ('connect','power-connect'):
                 with self.lock:self.loop=False;self.next_run=None
                 self.event('周期连接已停止。','error')
         finally:
@@ -199,10 +205,12 @@ class Console:
                     'success':'密码续登成功，已更新本地会话。'}[status],
                    'success' if status=='success' else 'info')
 
-    def connect(self):
+    def connect(self,power_on=False):
         cmd=[sys.executable,'-X','utf8',str(PROTOCOL/'connect_once.py'),'--config',str(self.config_file),'--session',str(self.session_file),
              '--hold-seconds',str(self.hold)]
+        if power_on:cmd.append('--power-on')
         env=os.environ.copy();env['CLOUDPC_DATA_DIR']=str(self.data_dir)
+        env['PYTHONUNBUFFERED']='1'
         proc=subprocess.Popen(cmd,cwd=PROTOCOL,env=env,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,encoding='utf-8')
         result=None
         labels={'login/verifyAccessTicket':'票据交换请求已返回。','login/recordDeviceInfo':'会话注册请求已返回。',
@@ -219,9 +227,9 @@ class Console:
                 # HTTP status only describes transport; wait for decoded final result.
         proc.wait()
         if result:self.last_result=safe_result(result)
-        if proc.returncode or not result or not result.get('success'):
+        if proc.returncode or not result or not result.get('success') or not result.get('desktopSessionEntered'):
             raise p.ProtocolError('连接未完成：'+p.connection_failure_message(result))
-        self.event('桌面认证成功，已保持 '+str(result.get('controlHoldSeconds',self.hold))+' 秒并完成断开上报。','success')
+        self.event('桌面画面已确认，已保持 '+str(result.get('controlHoldSeconds',self.hold))+' 秒并完成断开上报。','success')
 
     def set_loop(self,enabled):
         with self.lock:
@@ -246,7 +254,7 @@ class Console:
     def close(self):
         with self.lock:self.stopping=True;self.loop=False;self.next_run=None;job=self.job
         self.wake.set()
-        if job:job.join(timeout=85)
+        if job:job.join(timeout=300)
 
 def allowed_origins(port,extra=()):
     origins={f'http://127.0.0.1:{port}',f'http://localhost:{port}'}
@@ -310,7 +318,7 @@ def make_handler(console,port,extra_origins=(),public_port=None):
                 if action=='settings':console.settings(value)
                 elif action=='loop-start':console.set_loop(True)
                 elif action=='loop-stop':console.set_loop(False)
-                elif action in ('connect','devices','password','sms-send','sms-login','challenge'):console.start_job(action,value)
+                elif action in ('connect','power-connect','devices','password','sms-send','sms-login','challenge'):console.start_job(action,value)
                 else:return self.reply(404,{'error':'未知操作'})
                 self.reply(200,{'accepted':True})
             except (ValueError,KeyError) as exc:self.reply(400,{'error':str(exc)[:150]})
