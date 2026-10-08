@@ -58,10 +58,18 @@ def connection_options(machine,value=None):
         if args.count(name)!=1:raise p.ProtocolError('必要桌面选项不唯一')
         options[name]=value(name)
     for name in ('--al','--server-type','--user-mode','--watch-mode','--hub-ratio',
-                 '--play-lockscreen','--logon-noAD','--logon-type','--uactoken','--accessToken','--token-type'):
+                 '--play-lockscreen','--logon-noAD','--logon-type','--logon_type','--uactoken','--accessToken','--token-type'):
         count=args.count(name)
         if count>1:raise p.ProtocolError('桌面控制选项不唯一')
         if count:options[name]=value(name)
+    # spice_parse_command_line!0xe79820 reads 129-byte option records.
+    # Record 38 maps CLI "al" to GObject "logon-noAD", not auto-login.
+    # Record 104 maps CLI "logon_type" to GObject "logon-type".
+    for source,target in (('--al','--logon-noAD'),('--logon_type','--logon-type')):
+        if source in options:
+            if target in options and options[target]!=options[source]:
+                raise p.ProtocolError('桌面登录选项别名冲突')
+            options[target]=options[source]
     if options['--vmid']!=machine['machineId'] or options['--type']!='ice':
         raise p.ProtocolError('仅支持当前本人 ICE 桌面参数')
     return options
@@ -99,7 +107,9 @@ def control_session(sock,mini,directory,result,hold_seconds,on_connected,options
         ('baseVendor','cloudpc-console'),('baseProduct','protocol'),('baseModel',platform.machine()),
         ('baseOsType',platform.system()),('baseOsVersion',platform.release()),('baseSoftVersion','3.6.6'),
         ('baseSN',options.get('_terminal_serial','')),('baseIP',''),('clientIPv4',''),('clientMac','')))
-    agent=GuestAgent(send,result,options['-k'],options.get('_guest_user'),options.get('_guest_password'),options.get('--al')=='1',options.get('_login_key'),terminal,server_type=options.get('--server-type','common'),settings=options)
+    # spice_session_other_init!0xdd3f24 initializes the pending login flag to 1.
+    # It is independent of CLI --al, which selects the noAD login mode.
+    agent=GuestAgent(send,result,options['-k'],options.get('_guest_user'),options.get('_guest_password'),True,options.get('_login_key'),terminal,server_type=options.get('--server-type','common'),settings=options)
     agent.tokens=struct.unpack_from('<I',init,20)[0]
     if struct.unpack_from('<I',init,16)[0]:agent.start()
     # main_handle_init!0xe365fc requests version; 0xe3662c attaches channels.
@@ -171,7 +181,7 @@ def main_channel(sock,options,serial,directory,result,on_connected=None,hold_sec
     body[79:95]=serial
     # init_logon_info_rsa_encrypt_cap!0xe13780 offers bit13 when the native
     # login body fits RSA2048 OAEP (214 bytes). Keep other channels separate.
-    needs_login=options.get('--al')=='1' or options.get('--server-type')=='sy'
+    needs_login=bool(options.get('_guest_user'))
     login_size=len(login_payload(options['-k'],options['_guest_user'],options['_guest_password'])) if needs_login else 0
     caps=struct.pack('<I',8)
     if 0<login_size<=214:

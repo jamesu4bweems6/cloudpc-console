@@ -148,7 +148,7 @@ class GuestAgent:
         return raw
 
     def entry_login(self,source):
-        # _send_agent_user_logon_info / state handler: sy is independent of al.
+        # _send_agent_user_logon_info: sy is independent of the pending flag.
         if self.server_type=='sy' or self.auto_login_pending:
             self.login(repeat=True,source=source)
 

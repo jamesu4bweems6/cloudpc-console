@@ -1,0 +1,20 @@
+{
+  "source": "iOS 3.6.6 original SDK cmdline_option_info; spice_parse_command_line at 0xe79820",
+  "sdkSha256": "f9e12f4d121b51a186d922793e302d8e5e54e61dd26951b950b2efa118929d73",
+  "tableAddress": "0x17bfcf4",
+  "recordSize": 129,
+  "records": [
+    {
+      "index": 38,
+      "long": "al",
+      "short": 0,
+      "property": "logon-noAD"
+    },
+    {
+      "index": 104,
+      "long": "logon_type",
+      "short": 0,
+      "property": "logon-type"
+    }
+  ]
+}

@@ -4,7 +4,7 @@ Fixture payloads are synthetic. The native password sender was intercepted;
 its real inner-body construction has separate RSA/native encoding coverage.
 """
 import json,pathlib,struct,unittest
-from unittest.mock import Mock
+from unittest.mock import Mock,patch
 import cloudpc_protocol as p
 import zte_guest_agent as a
 import zte_gateway_probe as g
@@ -78,6 +78,7 @@ class OfficialEntryChecks(unittest.TestCase):
         value={'result':0,'success':True,'connectStr':connect+' --server-type sy --al 0 --hub-ratio 1 --play-lockscreen 0 --user-mode 7 --watch-mode 0 --accessToken synthetic-token --token-type 1'}
         options=g.connection_options({'machineId':'M1'},value)
         self.assertEqual(options['--user-mode'],'7');self.assertEqual(options['--accessToken'],'synthetic-token')
+        self.assertEqual(options['--logon-noAD'],'0')
         for tail in (' --hub-ratio 0',' --logon-noAD',' --logon-noAD --logon-type 2'):
             with self.assertRaises(p.ProtocolError):g.connection_options({'machineId':'M1'},dict(value,connectStr=value['connectStr']+tail))
 
@@ -99,5 +100,32 @@ class OfficialEntryChecks(unittest.TestCase):
                 if settings['--logon-noAD']=='1':self.assertEqual(wire.pop(0),a.message(85,b'\1'))
                 self.assertEqual(wire[0],a.message(82,expected))
                 self.assertEqual(wire[1],a.message(19,a.login_payload('12345678','test.user','')))
+
+    def test_native_cli_al_maps_to_noad_before_credentials(self):
+        fixture=json.loads((pathlib.Path(__file__).parent/'fixtures/official-login-options.json').read_text())
+        self.assertEqual(fixture['records'][0]['property'],'logon-noAD')
+        base='-p 5900 -h localhost -k 12345678 --vmid M1 --type ice --proxy-sport 443'
+        for flag in ('0','1'):
+            with self.subTest(al=flag):
+                value={'result':0,'success':True,'connectStr':base+' --al '+flag+' --logon_type 2'}
+                settings=g.connection_options({'machineId':'M1'},value)
+                self.assertEqual(settings['--logon-noAD'],flag)
+                self.assertEqual(settings['--logon-type'],'2')
+                send=Mock();agent=a.GuestAgent(send,{},'12345678','test.user','',True,settings=settings)
+                agent.start(20);before=send.call_count;agent.handle(6,struct.pack('<II',0,0))
+                wire=[call.args[1] for call in send.call_args_list[before:]]
+                self.assertEqual(wire,([a.message(85,b'\1')] if flag=='1' else [])+
+                    [a.message(82,b'\1'+bytes(256)),a.message(19,a.login_payload('12345678','test.user',''))])
+                self.assertFalse(agent.auto_login_pending)
+        with self.assertRaises(p.ProtocolError):
+            g.connection_options({'machineId':'M1'},dict(value,connectStr=base+' --al 1 --logon-noAD 0'))
+
+    def test_session_pending_login_default_is_independent_of_cli_al(self):
+        import tempfile
+        result={'desktopFrameReceived':True,'guestLogonState':1,'guestSessionEntered':True}
+        raw=Mock();raw.pending.return_value=0
+        with tempfile.TemporaryDirectory() as root,patch.object(g,'GuestAgent') as factory,patch.object(g.time,'monotonic',side_effect=[0,1,7,7]):
+            g.control_session(raw,False,pathlib.Path(root),result,5,None,{'-k':'12345678','--al':'0'},bytes(32))
+        self.assertIs(factory.call_args.args[5],True)
 
 if __name__=='__main__':unittest.main(verbosity=2)
