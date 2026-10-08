@@ -22,11 +22,19 @@ RESULT_FIELDS=('success','desktopProtocolConnected','gatewayAuthenticated','desk
 RESULT_FIELDS+=('guestAgentConnected','guestCapabilitiesReceived','guestLogonState','guestLoginSent','guestSessionEntered',
                 'displayChannelAuthenticated','inputsChannelAuthenticated','cursorChannelAuthenticated','displayMessageReceived',
                 'desktopSurfaceCreated','desktopVideoStreamCreated','desktopFrameReceived','desktopSessionEntered',
-                'desktopEntryWaitSeconds','powerOnAccepted','powerOnCompleted','legacyMainOnly')
+                'desktopEntryWaitSeconds','powerOnAccepted','powerOnCompleted','legacyMainOnly','legacyDisplayOnly',
+                'systemEntryConfirmed','desktopDisplayReady','guestLoginRsaNegotiated','guestLoginEncryption')
+
+def entered_system(value):
+    return bool(value.get('systemEntryConfirmed') and value.get('desktopFrameReceived')
+                and value.get('guestSessionEntered') and value.get('guestLogonState')==1)
 def safe_result(value):
     result={k:value[k] for k in RESULT_FIELDS if k in value}
-    if value.get('success') and not value.get('desktopSessionEntered'):
-        result.update(success=False,legacyMainOnly=True,errorHint='旧版仅确认主通道认证，未验证进入系统。')
+    if value.get('success') and not entered_system(value):
+        display=bool(value.get('desktopFrameReceived'))
+        result.update(success=False,desktopSessionEntered=False,systemEntryConfirmed=False,
+                      legacyMainOnly=not display,legacyDisplayOnly=display,
+                      errorHint='旧版仅确认桌面画面，未验证 Windows 登录或解锁。' if display else '旧版仅确认主通道认证，未验证进入系统。')
     elif not value.get('success'):result['errorHint']=p.connection_failure_message(result)
     return result
 def safe_machine(value):
@@ -227,9 +235,9 @@ class Console:
                 # HTTP status only describes transport; wait for decoded final result.
         proc.wait()
         if result:self.last_result=safe_result(result)
-        if proc.returncode or not result or not result.get('success') or not result.get('desktopSessionEntered'):
+        if proc.returncode or not result or not result.get('success') or not entered_system(result):
             raise p.ProtocolError('连接未完成：'+p.connection_failure_message(result))
-        self.event('桌面画面已确认，已保持 '+str(result.get('controlHoldSeconds',self.hold))+' 秒并完成断开上报。','success')
+        self.event('Windows 登录及桌面画面已确认，已保持 '+str(result.get('controlHoldSeconds',self.hold))+' 秒并完成断开上报。','success')
 
     def set_loop(self,enabled):
         with self.lock:

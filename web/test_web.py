@@ -90,12 +90,16 @@ class WebChecks(unittest.TestCase):
     def test_old_authentication_success_is_not_presented_as_desktop_entry(self):
         old=w.safe_result({'success':True,'desktopProtocolConnected':True})
         self.assertFalse(old['success']);self.assertTrue(old['legacyMainOnly'])
-        current=w.safe_result({'success':True,'desktopSessionEntered':True,'desktopFrameReceived':True,'guestLogonState':0})
-        self.assertTrue(current['success']);self.assertTrue(current['desktopFrameReceived'])
-        self.assertEqual(current['guestLogonState'],0)
+        display=w.safe_result({'success':True,'desktopSessionEntered':True,'desktopFrameReceived':True,'guestLogonState':0})
+        self.assertFalse(display['success']);self.assertTrue(display['legacyDisplayOnly'])
+        self.assertFalse(display['desktopSessionEntered'])
+        current=w.safe_result({'success':True,'systemEntryConfirmed':True,'desktopFrameReceived':True,'guestSessionEntered':True,'guestLogonState':1})
+        self.assertTrue(current['success'])
+        for change in ({'guestLogonState':0},{'guestSessionEntered':False},{'systemEntryConfirmed':False},{'desktopFrameReceived':False}):
+            self.assertFalse(w.safe_result(dict(current,**change))['success'])
 
     def test_connection_password_recovery_keeps_schedule_running(self):
-        result={'stage':'connect-once','success':True,'desktopSessionEntered':True,'sessionRecoveryAttempted':True,'sessionRecovered':True}
+        result={'stage':'connect-once','success':True,'desktopSessionEntered':True,'systemEntryConfirmed':True,'desktopFrameReceived':True,'guestSessionEntered':True,'guestLogonState':1,'sessionRecoveryAttempted':True,'sessionRecovered':True}
         proc=Mock();proc.stdout=iter([json.dumps({'stage':'session-recovery','status':'started'}),
                                    json.dumps({'stage':'session-recovery','status':'success'}),json.dumps(result)])
         proc.returncode=0;self.console.loop=True

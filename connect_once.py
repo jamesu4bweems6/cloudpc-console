@@ -75,12 +75,12 @@ def main():
             p.save_json(args.session,client.state)
             client.session_status(connect_id,True)
             result['connectedReportAccepted']=True
-            print('桌面画面已确认，在线连接上报已接受。',flush=True)
+            print('桌面画面及 Windows 登录已确认，在线连接上报已接受。',flush=True)
         phase='desktop_channel'
         result.update(g.run_gateway(machine,options,directory/'desktop',
                                    on_connected=connected,hold_seconds=args.hold_seconds,pin=pin))
         result['stage']='connect-once'
-        result['success']=bool(result.get('desktopSessionEntered') and result.get('controlSessionCompleted') and result.get('connectedReportAccepted'))
+        result['success']=bool(result.get('systemEntryConfirmed') and result.get('desktopFrameReceived') and result.get('guestSessionEntered') and result.get('guestLogonState')==1 and result.get('controlSessionCompleted') and result.get('connectedReportAccepted'))
         if not result['success']:result['failedStage']=phase
         if str(result.get('errorCode'))=='401':client.state['authRequired']=True
     except (p.ProtocolError,requests.RequestException,OSError,ValueError,KeyError) as exc:

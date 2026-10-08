@@ -7,11 +7,13 @@ fresh parameters and reports entry only after a desktop frame is received.
 Local proxy frames must not be sent as remote ICE frames.
 Wire structure is from SDK send_access_gateway_local_key!0x2094e4.
 """
-import datetime as dt,json,secrets,socket,struct,uuid,shlex,sys,ssl,hashlib,time,select
+import datetime as dt,json,secrets,socket,struct,uuid,shlex,sys,ssl,hashlib,time,select,platform
 from cryptography.hazmat.primitives.ciphers import Cipher,algorithms,modes
+from cryptography.hazmat.primitives.serialization import load_der_public_key
+from cryptography.hazmat.primitives.asymmetric import rsa
 import cloudpc_protocol as p
 from zte_connection import HERE
-from zte_guest_agent import GuestAgent
+from zte_guest_agent import GuestAgent,login_payload
 
 def read_exact(sock,n):
     out=bytearray()
@@ -50,15 +52,19 @@ def connection_options(machine,value=None):
     for name in ['-p','-h','-k','--vmid','--type','--proxy-sport']:
         if args.count(name)!=1:raise p.ProtocolError('必要桌面选项不唯一')
         options[name]=args[args.index(name)+1]
+    for name in ('--al','--server-type'):
+        if args.count(name)==1:options[name]=args[args.index(name)+1]
     if options['--vmid']!=machine['machineId'] or options['--type']!='ice':
         raise p.ProtocolError('仅支持当前本人 ICE 桌面参数')
     return options
 
 def link_capabilities(reply):
-    if len(reply)<182:raise p.ProtocolError('桌面能力头被截断')
-    ncommon,nchannel=struct.unpack_from('<II',reply,166)
-    offset=struct.unpack_from('<I',reply,178)[0]
-    if max(ncommon,nchannel)>1024 or offset<182 or offset+(ncommon+nchannel)*4>len(reply):
+    # recv_link_msg!0xde577c switches to a 294-byte DER key at size >=314.
+    base=314 if len(reply)>=314 else 182
+    if len(reply)<base:raise p.ProtocolError('桌面能力头被截断')
+    ncommon,nchannel=struct.unpack_from('<II',reply,base-16)
+    offset=struct.unpack_from('<I',reply,base-4)[0]
+    if max(ncommon,nchannel)>1024 or offset<base or offset+(ncommon+nchannel)*4>len(reply):
         raise p.ProtocolError('桌面能力数组长度不一致')
     common=list(struct.unpack_from('<'+'I'*ncommon,reply,offset))
     channel=list(struct.unpack_from('<'+'I'*nchannel,reply,offset+ncommon*4))
@@ -80,22 +86,33 @@ def control_session(sock,mini,directory,result,hold_seconds,on_connected,options
         hdr=struct.pack('<HIB',kind,len(payload),0) if mini else struct.pack('<QHIIB',serial,kind,len(payload),0,0)
         sock.sendall(hdr+payload)
         result.setdefault('mainSentTypes',[]).append(kind)
-    agent=GuestAgent(send,result,options['-k'],options.get('_guest_user'),options.get('_guest_password'))
-    if struct.unpack_from('<I',init,16)[0]:agent.start(struct.unpack_from('<I',init,20)[0])
+    def field(value):return str(value).replace('|','').replace(':','')[:128]
+    terminal='serverType:'+field(options.get('--server-type','common'))+'|'+ '|'.join(k+':'+field(v) for k,v in (
+        ('baseVendor','cloudpc-console'),('baseProduct','protocol'),('baseModel',platform.machine()),
+        ('baseOsType',platform.system()),('baseOsVersion',platform.release()),('baseSoftVersion','3.6.6'),
+        ('baseSN',options.get('_terminal_serial','')),('baseIP',''),('clientIPv4',''),('clientMac','')))
+    agent=GuestAgent(send,result,options['-k'],options.get('_guest_user'),options.get('_guest_password'),options.get('--al')=='1',options.get('_login_key'),terminal)
+    agent.tokens=struct.unpack_from('<I',init,20)[0]
+    if struct.unpack_from('<I',init,16)[0]:agent.start()
     # main_handle_init!0xe365fc requests version; 0xe3662c attaches channels.
     send(114,struct.pack('<II',1,1));send(104)
     reported=False;started=time.monotonic();deadline=started+max(30,hold_seconds)
+    queries=0;next_query=started+5
     raw=sock.sock if isinstance(sock,IceStream) else sock
     for i in range(128):
         if isinstance(sock,IceStream):sock.consume_auxiliary()
-        if result.get('desktopSessionEntered') and not reported:
+        if result.get('desktopFrameReceived') and result.get('guestSessionEntered') and not reported:
+            result.update(systemEntryConfirmed=True,desktopSessionEntered=True)
             if on_connected:on_connected()
             reported=True;entered=time.monotonic();deadline=entered+hold_seconds
             result['desktopEntryWaitSeconds']=round(entered-started,2)
+        if agent.login_sent and not reported and queries<3 and time.monotonic()>=next_query:
+            agent.emit(16,struct.pack('<I',0));queries+=1;next_query=time.monotonic()+5
         remaining=deadline-time.monotonic()
         if remaining<=0:break
         buffered=isinstance(sock,IceStream) and sock.message_ready(mini)
-        if not buffered and not raw.pending() and not select.select([raw],[],[],remaining)[0]:continue
+        wait=min(remaining,max(.01,next_query-time.monotonic())) if agent.login_sent and not reported and queries<3 else remaining
+        if not buffered and not raw.pending() and not select.select([raw],[],[],wait)[0]:continue
         raw.settimeout(max(.1,min(8,remaining)))
         if isinstance(sock,IceStream) and not buffered:
             sock.pump();sock.consume_auxiliary();continue
@@ -117,7 +134,9 @@ def control_session(sock,mini,directory,result,hold_seconds,on_connected,options
                         open_desktop_channel(sock,init,directory,result,typ,channel_id)
         else:agent.receive(kind,payload)
     else:raise p.ProtocolError('主通道控制消息数量超过实验限制')
-    if not reported:raise p.ConnectionError('DESKTOP_ENTRY_UNCONFIRMED')
+    if not reported or not result.get('guestSessionEntered'):
+        result.update(systemEntryConfirmed=False,desktopSessionEntered=False)
+        raise p.ConnectionError('GUEST_ENTRY_UNCONFIRMED' if result.get('desktopFrameReceived') else 'DESKTOP_ENTRY_UNCONFIRMED')
     result['controlHoldSeconds']=round(time.monotonic()-entered,2)
     result['controlSessionCompleted']=True
 
@@ -140,7 +159,13 @@ def main_channel(sock,options,serial,directory,result,on_connected=None,hold_sec
     vmid=options['--vmid'].encode('ascii')
     body[42:42+len(vmid)]=vmid
     body[79:95]=serial
-    packet=struct.pack('<4sIII',b'REDQ',2,2,len(body)+4)+body+struct.pack('<I',8)
+    # init_logon_info_rsa_encrypt_cap!0xe13780 offers bit13 when the native
+    # login body fits RSA2048 OAEP (214 bytes). Keep other channels separate.
+    login_size=len(login_payload(options['-k'],options['_guest_user'],options['_guest_password'])) if options.get('--al')=='1' else 0
+    caps=struct.pack('<I',8)
+    if 0<login_size<=214:
+        struct.pack_into('<I',body,10,1);caps+=struct.pack('<I',1<<13)
+    packet=struct.pack('<4sIII',b'REDQ',2,2,len(body)+len(caps))+body+caps
     if isinstance(sock,IceStream):sock.link_body=body
     (directory/'link-request.local.bin').write_bytes(packet)
     sock.sendall(packet)
@@ -154,7 +179,11 @@ def main_channel(sock,options,serial,directory,result,on_connected=None,hold_sec
     error=struct.unpack_from('<I',reply)[0]
     result.update(desktopLinkError=error,desktopLinkReplySize=size)
     if error: return
-    if size>=314:raise p.ConnectionError('GUEST_RSA_LINK_UNSUPPORTED')
+    if size>=314:
+        try:key=load_der_public_key(reply[4:298])
+        except ValueError:raise p.ProtocolError('来宾登录公钥无法解析') from None
+        if not isinstance(key,rsa.RSAPublicKey) or key.key_size!=2048:raise p.ProtocolError('来宾登录公钥类型不匹配')
+        options=dict(options,_login_key=key);result['guestLoginRsaNegotiated']=True
     # ZTE inserts a 4-byte field before caps_offset (recv_link_msg +0xb2).
     common,channel=link_capabilities(reply)
     if channel and channel[0]&(1<<18):
@@ -189,6 +218,7 @@ def open_desktop_channel(main,init,directory,result,typ,channel_id):
     route=bytearray(main.route);route[84]=typ;route[85]=channel_id
     main.sock.sendall(struct.pack('<BBH',26,typ,len(route))+route)
     body=bytearray(main.link_body)
+    struct.pack_into('<I',body,10,0)
     struct.pack_into('<I',body,0,struct.unpack_from('<I',init)[0]);body[4]=typ;body[5]=channel_id
     display.sendall(struct.pack('<4sIII',b'REDQ',2,2,709)+body+struct.pack('<I',8))
     magic,major,minor,size=struct.unpack('<4sIII',read_exact(display,16))
@@ -291,7 +321,7 @@ class IceStream:
             if surface not in getattr(self,'surfaces',set()) or codec!=2:return
             data=payload[12:];prefix=4 if data.startswith(b'\0\0\0\1') else 3 if data.startswith(b'\0\0\1') else 0
             if not prefix or len(data)<=prefix or not 1<=(data[prefix]&31)<=23:return
-            self.result.update(desktopFrameReceived=True,desktopSessionEntered=True)
+            self.result.update(desktopFrameReceived=True,desktopDisplayReady=True)
 
 def ice_transport(sock,options,serial,directory,result,on_connected=None,hold_seconds=0,pin=None):
     # send_usbipc_ice_server_port!0xe6226c: 116 bytes, then TLS when

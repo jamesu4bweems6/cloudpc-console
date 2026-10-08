@@ -189,7 +189,7 @@ class DesktopChecks(unittest.TestCase):
         c.machine_connected=Mock(side_effect=report)
         def gateway(*args,**kwargs):
             kwargs['on_connected']()
-            return {'desktopSessionEntered':True,'controlSessionCompleted':True,'desktopProtocolConnected':True,'controlHoldSeconds':15}
+            return {'desktopSessionEntered':True,'systemEntryConfirmed':True,'desktopFrameReceived':True,'guestSessionEntered':True,'guestLogonState':1,'controlSessionCompleted':True,'desktopProtocolConnected':True,'controlHoldSeconds':15}
         with tempfile.TemporaryDirectory() as temp:
             root=pathlib.Path(temp);config=root/'account.local.json';session=root/'session.local.json'
             p.save_json(config,c.config);p.save_json(session,STATE)

@@ -4,9 +4,14 @@ Only capability exchange, login state, guest login and user mode are supported.
 There is no clipboard, file transfer, input injection or guest logout command.
 """
 import hashlib, struct
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import padding
 import cloudpc_protocol as p
 
 MAX_MESSAGE = 65536
+# agent_announce_caps!0xe21804: native desktop extensions, without clipboard
+# bits 4/5. Match the native vendor handshake while omitting clipboard support.
+CAPABILITIES = (0x8a008007, 0x000080c0)
 
 def message(kind, payload=b''):
     if len(payload)>MAX_MESSAGE:raise p.ProtocolError('来宾消息过长')
@@ -32,11 +37,14 @@ def login_payload(ticket, username, password):
     return bytes(b^key for b in plain)
 
 class GuestAgent:
-    def __init__(self,send,result,ticket,username=None,password=None):
+    def __init__(self,send,result,ticket,username=None,password=None,auto_login=False,login_key=None,terminal_info=None):
         self.send=send;self.result=result;self.ticket=ticket
         self.username=username;self.password=password
         self.buffer=bytearray();self.queue=[];self.tokens=0
         self.started=False;self.login_sent=False
+        self.auto_login=auto_login
+        self.login_key=login_key
+        self.terminal_info=terminal_info
 
     def flush(self):
         while self.queue and self.tokens:
@@ -49,24 +57,35 @@ class GuestAgent:
         self.result.setdefault('agentSentTypes',[]).append(kind)
         self.flush()
 
-    def start(self,tokens):
+    def start(self,tokens=None):
         if self.started:return
-        self.started=True;self.tokens=tokens
+        self.started=True
+        if tokens is not None:self.tokens=tokens
         self.result['guestAgentConnected']=True
         self.send(106,struct.pack('<I',0xffffffff))
-        # Only the generic REPLY capability; no display configuration/clipboard.
-        self.emit(6,struct.pack('<III',1,1<<2,0))
+        self.emit(6,struct.pack('<III',1,*CAPABILITIES))
+        if self.terminal_info:
+            raw=self.terminal_info.encode('utf-8')+b'\0'
+            if len(raw)>2048:raise p.ProtocolError('终端信息超过样本限制')
+            self.emit(143,struct.pack('<I',len(raw))+raw)
         self.emit(16,struct.pack('<I',0))
 
     def login(self):
         if self.started and not self.login_sent:
             # user_logon_type!0xe1bf4c sends password login type 0 as ONE byte.
+            payload=login_payload(self.ticket,self.username,self.password)
+            if self.login_key:
+                try:payload=self.login_key.encrypt(payload,padding.OAEP(mgf=padding.MGF1(hashes.SHA1()),algorithm=hashes.SHA1(),label=None))
+                except ValueError:raise p.ProtocolError('来宾登录 RSA 报文无法加密') from None
+            self.result['guestLoginEncryption']='rsa2048_oaep_sha1' if self.login_key else 'legacy_xor'
             self.emit(82,b'\0')
-            self.emit(19,login_payload(self.ticket,self.username,self.password))
+            self.emit(19,payload)
             self.login_sent=True;self.result['guestLoginSent']=True
 
     def receive(self,kind,payload):
-        if kind==107:self.start(struct.unpack('<I',payload)[0] if len(payload)==4 else 0)
+        if kind==107:
+            if len(payload) not in (0,4):raise p.ProtocolError('来宾连接消息长度异常')
+            self.start(struct.unpack('<I',payload)[0] if payload else None)
         elif kind==110:
             if len(payload)!=4:raise p.ProtocolError('来宾令牌消息长度异常')
             self.tokens=min(65536,self.tokens+struct.unpack('<I',payload)[0]);self.flush()
@@ -88,12 +107,12 @@ class GuestAgent:
         if kind==6:
             if len(body)<4 or len(body)%4:raise p.ProtocolError('来宾能力消息长度异常')
             self.result['guestCapabilitiesReceived']=True
-            if struct.unpack_from('<I',body)[0]:self.emit(6,struct.pack('<III',0,1<<2,0))
+            if struct.unpack_from('<I',body)[0]:self.emit(6,struct.pack('<III',0,*CAPABILITIES))
         elif kind==16:
             if len(body)!=4:raise p.ProtocolError('来宾登录状态长度异常')
             state=struct.unpack('<I',body)[0]
             self.result['guestLogonState']=state
-            if state:
-                self.result['guestSessionEntered']=True
-            # A Windows lock screen is already a desktop session. Querying
-            # its login state must not implicitly submit Windows credentials.
+            self.result['guestSessionEntered']=state==1
+            if state==1 and not self.result.get('guestUserModeSent'):
+                self.emit(127,struct.pack('<I',3));self.result['guestUserModeSent']=True
+            elif state==0 and self.auto_login:self.login()

@@ -30,6 +30,7 @@ class ProtocolError(Exception):
     pass
 
 CONNECTION_HINTS = {
+    'GUEST_ENTRY_UNCONFIRMED': '收到桌面画面，但未确认 Windows 登录或解锁；本次不计为进入系统。',
     'GUEST_CREDENTIALS_MISSING': '来宾未登录且连接响应未提供完整来宾凭据。',
     'GUEST_AGENT_DISCONNECTED': '来宾代理已断开，未完成进入系统。',
     'DESKTOP_ENTRY_UNCONFIRMED': '仅完成通道认证，未收到有效桌面画面；本次不计为进入系统。',

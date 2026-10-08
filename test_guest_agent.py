@@ -19,12 +19,12 @@ class GuestEntryChecks(unittest.TestCase):
         self.assertNotIn('guestSessionEntered',result)
         agent.receive(109,wire[-1:]);self.assertTrue(result['guestSessionEntered'])
         self.assertTrue(result['guestCapabilitiesReceived'])
-        self.assertEqual(result['agentSentTypes'],[6,16,6])
+        self.assertEqual(result['agentSentTypes'],[6,16,6,127])
 
     def test_guest_zero_does_not_trigger_windows_login(self):
         agent,result,send=self.agent()
         for _ in range(2):agent.receive(109,a.message(16,struct.pack('<I',0)))
-        self.assertNotIn('guestSessionEntered',result)
+        self.assertFalse(result['guestSessionEntered'])
         self.assertEqual(result['agentSentTypes'],[6,16])
         agent.login();agent.login()
         self.assertEqual(result['agentSentTypes'],[6,16,82,19])
@@ -36,6 +36,59 @@ class GuestEntryChecks(unittest.TestCase):
         agent.receive(110,struct.pack('<I',1));self.assertEqual(send.call_count,2)
         agent.receive(110,struct.pack('<I',1));self.assertEqual(send.call_count,3)
         self.assertEqual(agent.queue,[]);self.assertNotIn('guestSessionEntered',result)
+
+    def test_delayed_agent_connected_preserves_main_init_tokens(self):
+        send=Mock();result={};agent=a.GuestAgent(send,result,'12345678')
+        agent.tokens=600;agent.receive(107,b'')
+        self.assertEqual(agent.tokens,598);self.assertEqual(agent.queue,[])
+        self.assertEqual(send.call_count,3)
+        with self.assertRaises(p.ProtocolError):agent.receive(107,b'bad')
+
+    def test_auto_login_is_once_and_unknown_or_locked_state_cannot_confirm_entry(self):
+        send=Mock();result={};agent=a.GuestAgent(send,result,'12345678','test.user','p a!',auto_login=True)
+        agent.start(20)
+        for state in (0,0,2):agent.handle(16,struct.pack('<I',state))
+        self.assertFalse(result['guestSessionEntered'])
+        self.assertEqual(result['agentSentTypes'].count(19),1)
+        agent.handle(16,struct.pack('<I',1));self.assertTrue(result['guestSessionEntered'])
+        agent.handle(16,struct.pack('<I',0));self.assertFalse(result['guestSessionEntered'])
+        self.assertEqual(result['agentSentTypes'].count(19),1)
+
+    def test_rsa2048_login_decrypts_to_native_inner_payload(self):
+        from cryptography.hazmat.primitives.asymmetric import rsa,padding
+        from cryptography.hazmat.primitives import hashes
+        key=rsa.generate_private_key(public_exponent=65537,key_size=2048)
+        send=Mock();result={}
+        agent=a.GuestAgent(send,result,'12345678','test.user','p a!',login_key=key.public_key())
+        agent.start(20);agent.login()
+        wire=send.call_args.args[1];self.assertEqual(struct.unpack_from('<IIQI',wire),(1,19,0,256))
+        plain=key.decrypt(wire[20:],padding.OAEP(mgf=padding.MGF1(hashes.SHA1()),algorithm=hashes.SHA1(),label=None))
+        self.assertEqual(plain,a.login_payload('12345678','test.user','p a!'))
+        self.assertEqual(result['guestLoginEncryption'],'rsa2048_oaep_sha1')
+
+    def test_extended_rsa_capability_reply_bounds(self):
+        reply=bytearray(322);struct.pack_into('<IIIIII',reply,298,1,1,0,314,0x502,0x84709)
+        self.assertEqual(g.link_capabilities(reply),([0x502],[0x84709]))
+        for offset in (182,323,0xffffffff):
+            struct.pack_into('<I',reply,310,offset)
+            with self.assertRaises(p.ProtocolError):g.link_capabilities(reply)
+
+    def test_lock_screen_frame_cannot_trigger_connected_report(self):
+        result={'desktopFrameReceived':True,'guestLogonState':0,'guestSessionEntered':False};callback=Mock()
+        raw=Mock();raw.pending.return_value=0
+        with tempfile.TemporaryDirectory() as root,patch.object(g.time,'monotonic',side_effect=[0,31,31]):
+            with self.assertRaises(p.ConnectionError) as caught:
+                g.control_session(raw,False,pathlib.Path(root),result,15,callback,{'-k':'12345678'},bytes(32))
+        self.assertEqual(caught.exception.diagnostic_code,'GUEST_ENTRY_UNCONFIRMED')
+        self.assertFalse(result['systemEntryConfirmed']);callback.assert_not_called()
+
+    def test_frame_and_logged_on_state_allow_report_after_confirmation(self):
+        result={'desktopFrameReceived':True,'guestLogonState':1,'guestSessionEntered':True};callback=Mock()
+        raw=Mock();raw.pending.return_value=0
+        with tempfile.TemporaryDirectory() as root,patch.object(g.time,'monotonic',side_effect=[0,1,20,20]):
+            g.control_session(raw,False,pathlib.Path(root),result,15,callback,{'-k':'12345678'},bytes(32))
+        callback.assert_called_once();self.assertTrue(result['systemEntryConfirmed'])
+        self.assertTrue(result['controlSessionCompleted'])
 
     def test_reject_invalid_agent_header_size_and_state(self):
         for wire in (struct.pack('<IIQI',2,6,0,0),struct.pack('<IIQI',1,6,0,65537),a.message(16,b'\0')):
@@ -93,7 +146,8 @@ class GuestEntryChecks(unittest.TestCase):
             display.accept_display(123,struct.pack('<III',29,100,6)+frame[12:])
             self.assertNotIn('desktopSessionEntered',display.result)
             display.accept_display(123,frame)
-            self.assertTrue(display.result['desktopSessionEntered'])
+            self.assertNotIn('desktopSessionEntered',display.result)
+            self.assertTrue(display.result['desktopDisplayReady'])
             self.assertTrue(display.result['desktopFrameReceived'])
             for bad in (b'\0',struct.pack('<III',28,100,7)+frame[12:]):
                 with self.assertRaises(p.ProtocolError):display.accept_display(123,bad)
@@ -101,7 +155,7 @@ class GuestEntryChecks(unittest.TestCase):
     def test_main_authentication_cannot_trigger_connected_report(self):
         result={'desktopProtocolConnected':True};callback=Mock()
         raw=Mock();raw.pending.return_value=0
-        with tempfile.TemporaryDirectory() as root, patch.object(g.time,'monotonic',side_effect=[0,31]):
+        with tempfile.TemporaryDirectory() as root, patch.object(g.time,'monotonic',side_effect=[0,31,31]):
             with self.assertRaises(p.ConnectionError) as caught:
                 g.control_session(raw,False,pathlib.Path(root),result,15,callback,{'-k':'12345678'},bytes(32))
         self.assertEqual(caught.exception.diagnostic_code,'DESKTOP_ENTRY_UNCONFIRMED')
