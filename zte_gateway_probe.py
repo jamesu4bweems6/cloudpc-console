@@ -13,7 +13,7 @@ from cryptography.hazmat.primitives.serialization import load_der_public_key
 from cryptography.hazmat.primitives.asymmetric import rsa
 import cloudpc_protocol as p
 from zte_connection import HERE
-from zte_guest_agent import GuestAgent,login_payload
+from zte_guest_agent import GuestAgent,login_payload,guest_credentials
 
 def read_exact(sock,n):
     out=bytearray()
@@ -99,7 +99,8 @@ def control_session(sock,mini,directory,result,hold_seconds,on_connected,options
     reported=False;started=time.monotonic();deadline=started+max(30,hold_seconds)
     queries=0;next_query=started+5
     raw=sock.sock if isinstance(sock,IceStream) else sock
-    for i in range(128):
+    main_count=0
+    while True:
         if isinstance(sock,IceStream):sock.consume_auxiliary()
         if result.get('desktopFrameReceived') and result.get('guestSessionEntered') and not reported:
             result.update(systemEntryConfirmed=True,desktopSessionEntered=True)
@@ -116,8 +117,10 @@ def control_session(sock,mini,directory,result,hold_seconds,on_connected,options
         raw.settimeout(max(.1,min(8,remaining)))
         if isinstance(sock,IceStream) and not buffered:
             sock.pump();sock.consume_auxiliary();continue
+        if main_count>=128:raise p.ProtocolError('主通道控制消息数量超过实验限制')
         kind,hdr,payload=read_main_message(sock,mini)
-        (directory/f'control-{i:02d}-{kind}.local.bin').write_bytes(hdr+payload)
+        (directory/f'control-{main_count:02d}-{kind}.local.bin').write_bytes(hdr+payload)
+        main_count+=1
         result.setdefault('mainMessageTypes',[]).append(kind)
         if kind==4:
             if len(payload)<12:raise p.ProtocolError('PING 消息被截断')
@@ -133,7 +136,6 @@ def control_session(sock,mini,directory,result,hold_seconds,on_connected,options
                     if typ in (2,3,4) and not result.get({2:'display',3:'inputs',4:'cursor'}[typ]+'ChannelAuthenticated'):
                         open_desktop_channel(sock,init,directory,result,typ,channel_id)
         else:agent.receive(kind,payload)
-    else:raise p.ProtocolError('主通道控制消息数量超过实验限制')
     if not reported or not result.get('guestSessionEntered'):
         result.update(systemEntryConfirmed=False,desktopSessionEntered=False)
         raise p.ConnectionError('GUEST_ENTRY_UNCONFIRMED' if result.get('desktopFrameReceived') else 'DESKTOP_ENTRY_UNCONFIRMED')
@@ -257,7 +259,9 @@ class IceStream:
         out=bytes(self.buffer[:n]);del self.buffer[:n];return out
 
     def pump(self):
-        if self.parent.count>=256:raise p.ProtocolError('ICE 接收帧数超过实验限制')
+        # An unlocked desktop produces many more frames than the static lock
+        # screen; retain a bounded allowance for the 60-second session limit.
+        if self.parent.count>=4096:raise p.ProtocolError('ICE 接收帧数超过实验限制')
         header=read_exact(self.sock,4)
         kind,link,size=struct.unpack('<BBH',header);payload=read_exact(self.sock,size)
         (self.parent.directory/f'ice-frame-{self.parent.count:03d}.local.bin').write_bytes(header+payload)
@@ -362,7 +366,8 @@ def ice_transport(sock,options,serial,directory,result,on_connected=None,hold_se
         main_channel(stream,options,serial,directory,result,on_connected,hold_seconds)
 
 def run_gateway(machine,options,directory,ice=True,on_connected=None,hold_seconds=0,pin=None,authenticate=True,desktop=False):
-    options=dict(options,_guest_user=machine.get('adUser'),_guest_password=machine.get('adPassword'))
+    guest_user,guest_password=guest_credentials(machine)
+    options=dict(options,_guest_user=guest_user,_guest_password=guest_password)
     cag=machine['customLoginParams']['cagList'][0]
     if pin and pin['gateway']!=f"{cag['addr']}:{cag['port']}":
         raise p.ConnectionError('ICE_PIN_GATEWAY_MISMATCH')

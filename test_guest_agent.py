@@ -8,6 +8,24 @@ from test_desktop import FragmentSocket
 from test_protocol import client,ok,STATE
 
 class GuestEntryChecks(unittest.TestCase):
+    def test_guest_aes_credentials_use_encry_and_preserve_plain_fields(self):
+        from cryptography.hazmat.primitives.ciphers import Cipher,algorithms,modes
+        from cryptography.hazmat.primitives import padding
+        def encrypted(text):
+            padder=padding.PKCS7(128).padder()
+            raw=padder.update(text.encode())+padder.finalize()
+            enc=Cipher(algorithms.AES(b'56Acf4c3498fD4c5a0B1fb26947e2daB'),modes.CBC(b'3498fD4c5a0B1fbA')).encryptor()
+            return (enc.update(raw)+enc.finalize()).hex()
+        password=encrypted('test-pass!')
+        machine={'adUser':'test.user','adPassword':password,'customLoginParams':{'encry':0,'logonType':1}}
+        self.assertEqual(a.guest_credentials(machine),('test.user','test-pass!'))
+        machine['adUser']=encrypted('domain\\user')
+        self.assertEqual(a.guest_credentials(machine),('domain\\user','test-pass!'))
+        machine['customLoginParams']['encry']=1
+        self.assertEqual(a.guest_credentials(machine),(machine['adUser'],password))
+        machine={'adUser':'plain.user','adPassword':'not hex','customLoginParams':{'encry':0}}
+        self.assertEqual(a.guest_credentials(machine),('plain.user','not hex'))
+
     def agent(self,tokens=20):
         result={};send=Mock();agent=a.GuestAgent(send,result,'12345678','test.user','p a!')
         agent.start(tokens);return agent,result,send
@@ -19,15 +37,15 @@ class GuestEntryChecks(unittest.TestCase):
         self.assertNotIn('guestSessionEntered',result)
         agent.receive(109,wire[-1:]);self.assertTrue(result['guestSessionEntered'])
         self.assertTrue(result['guestCapabilitiesReceived'])
-        self.assertEqual(result['agentSentTypes'],[6,16,6,127])
+        self.assertEqual(result['agentSentTypes'],[6,16,23,6,127])
 
     def test_guest_zero_does_not_trigger_windows_login(self):
         agent,result,send=self.agent()
         for _ in range(2):agent.receive(109,a.message(16,struct.pack('<I',0)))
         self.assertFalse(result['guestSessionEntered'])
-        self.assertEqual(result['agentSentTypes'],[6,16])
+        self.assertEqual(result['agentSentTypes'],[6,16,23])
         agent.login();agent.login()
-        self.assertEqual(result['agentSentTypes'],[6,16,82,19])
+        self.assertEqual(result['agentSentTypes'],[6,16,23,82,19])
         self.assertEqual(send.call_args_list[-2].args[1],a.message(82,b'\0'))
 
     def test_token_exhaustion_queues_without_sending_or_inventing_entry(self):
@@ -35,13 +53,14 @@ class GuestEntryChecks(unittest.TestCase):
         self.assertEqual(send.call_count,1)
         agent.receive(110,struct.pack('<I',1));self.assertEqual(send.call_count,2)
         agent.receive(110,struct.pack('<I',1));self.assertEqual(send.call_count,3)
+        agent.receive(110,struct.pack('<I',1));self.assertEqual(send.call_count,4)
         self.assertEqual(agent.queue,[]);self.assertNotIn('guestSessionEntered',result)
 
     def test_delayed_agent_connected_preserves_main_init_tokens(self):
         send=Mock();result={};agent=a.GuestAgent(send,result,'12345678')
         agent.tokens=600;agent.receive(107,b'')
-        self.assertEqual(agent.tokens,598);self.assertEqual(agent.queue,[])
-        self.assertEqual(send.call_count,3)
+        self.assertEqual(agent.tokens,597);self.assertEqual(agent.queue,[])
+        self.assertEqual(send.call_count,4)
         with self.assertRaises(p.ProtocolError):agent.receive(107,b'bad')
 
     def test_auto_login_is_once_and_unknown_or_locked_state_cannot_confirm_entry(self):
@@ -89,6 +108,20 @@ class GuestEntryChecks(unittest.TestCase):
             g.control_session(raw,False,pathlib.Path(root),result,15,callback,{'-k':'12345678'},bytes(32))
         callback.assert_called_once();self.assertTrue(result['systemEntryConfirmed'])
         self.assertTrue(result['controlSessionCompleted'])
+
+    def test_busy_display_can_hold_session_past_128_auxiliary_frames(self):
+        result={'desktopFrameReceived':True,'guestLogonState':1,'guestSessionEntered':True}
+        callback=Mock();clock=[0.0];raw=Mock();raw.pending.return_value=1
+        with tempfile.TemporaryDirectory() as root:
+            stream=g.IceStream(raw,pathlib.Path(root),result)
+            stream.consume_auxiliary=Mock();stream.message_ready=Mock(return_value=False)
+            def pump():clock[0]+=.1
+            stream.pump=Mock(side_effect=pump)
+            with patch.object(g.time,'monotonic',side_effect=lambda:clock[0]):
+                g.control_session(stream,False,pathlib.Path(root),result,15,callback,{'-k':'12345678'},bytes(32))
+        self.assertGreater(stream.pump.call_count,128)
+        self.assertGreaterEqual(result['controlHoldSeconds'],15)
+        self.assertTrue(result['controlSessionCompleted']);callback.assert_called_once()
 
     def test_reject_invalid_agent_header_size_and_state(self):
         for wire in (struct.pack('<IIQI',2,6,0,0),struct.pack('<IIQI',1,6,0,65537),a.message(16,b'\0')):

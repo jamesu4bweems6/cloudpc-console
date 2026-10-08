@@ -6,12 +6,41 @@ There is no clipboard, file transfer, input injection or guest logout command.
 import hashlib, struct
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 import cloudpc_protocol as p
 
 MAX_MESSAGE = 65536
 # agent_announce_caps!0xe21804: native desktop extensions, without clipboard
 # bits 4/5. Match the native vendor handshake while omitting clipboard support.
 CAPABILITIES = (0x8a008007, 0x000080c0)
+
+def guest_credentials(machine):
+    # ParseSuOperPara!0x11ba6b4 uses customLoginParams.encry, not logonType.
+    # AesCbcDecode!0x11b9cd0 leaves non-hex/non-block inputs unchanged.
+    username, password = machine.get('adUser'), machine.get('adPassword')
+    if (machine.get('customLoginParams') or {}).get('encry') == 1:
+        return username, password
+    def decode(value):
+        if not isinstance(value, str) or not value:
+            return value
+        try:
+            raw = bytes.fromhex(value)
+        except ValueError:
+            return value
+        if len(value) != len(raw)*2 or not raw or len(raw)%16:
+            return value
+        decryptor = Cipher(algorithms.AES(b'56Acf4c3498fD4c5a0B1fb26947e2daB'),
+                           modes.CBC(b'3498fD4c5a0B1fbA')).decryptor()
+        plain = decryptor.update(raw)+decryptor.finalize()
+        # Native clears last-byte modulo 16 padding, then assigns a C string.
+        count = plain[-1]%16
+        if count:
+            plain = plain[:-count]+bytes(count)
+        try:
+            return plain.split(b'\0',1)[0].decode('utf-8')
+        except UnicodeDecodeError:
+            raise p.ProtocolError('来宾 AES 凭据解码失败') from None
+    return decode(username), decode(password)
 
 def message(kind, payload=b''):
     if len(payload)>MAX_MESSAGE:raise p.ProtocolError('来宾消息过长')
@@ -69,6 +98,8 @@ class GuestAgent:
             if len(raw)>2048:raise p.ProtocolError('终端信息超过样本限制')
             self.emit(143,struct.pack('<I',len(raw))+raw)
         self.emit(16,struct.pack('<I',0))
+        # main_handle_init!0xe36548 queries the guest version after logon state.
+        self.emit(23,struct.pack('<I',1))
 
     def login(self):
         if self.started and not self.login_sent:
