@@ -65,7 +65,30 @@ def connection_failure_message(result):
         return ('ICE TLS 验证或握手失败，请核对 ICE 固定证书。' if result.get('gatewayAuthenticated') else
                 'CAG HTTPS 验证或握手失败，请检查 CAG 固定证书及 TLS 配置。')
     if result.get('errorCode'):return '业务码 '+str(result['errorCode'])
+    # errorMessage 只来自协议层固定文案（见 connect_once.py），不含原始传输异常文本。
+    if result.get('errorMessage'):
+        return '%s（错误类型 %s，阶段 %s）' % (result['errorMessage'], result.get('errorType') or '未知',
+                                          result.get('failedStage') or '未知')
     return '请查看最近记录中的错误类型和失败阶段。'
+
+# 带诊断码但仍属瞬时失败、值得重试的情形；其余诊断码（证书固定、登录票据、
+# 来宾登录未确认等）重试没有意义或有风险，一律不重试。
+RETRYABLE_DIAGNOSTICS = frozenset({'GUEST_AGENT_DISCONNECTED', 'DESKTOP_ENTRY_UNCONFIRMED',
+                                   'DESKTOP_PARAMETERS_PENDING'})
+
+def is_retryable_failure(result):
+    """判断一次失败的连接是否适合自动重试。result 为 None 表示子进程没有产出结果（崩溃）。"""
+    if result is None:return True
+    if result.get('success'):return False
+    # 会话失效、业务错误：重试只会重复被拒绝。
+    if result.get('authenticationRequired') or result.get('errorCode'):return False
+    code = result.get('diagnosticCode')
+    if code and code not in RETRYABLE_DIAGNOSTICS:return False
+    # 已进入桌面但断开上报失败：不要再开一个新连接。
+    if result.get('cleanupErrorType'):return False
+    # 已向来宾提交过凭据却没有登录成功：重复提交可能导致账号被锁定。
+    if result.get('guestLoginSent') and result.get('guestLogonState') != 1:return False
+    return True
 
 class BusinessError(ProtocolError):
     def __init__(self, code, response):

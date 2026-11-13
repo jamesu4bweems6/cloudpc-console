@@ -25,7 +25,11 @@ RESULT_FIELDS+=('guestAgentConnected','guestCapabilitiesReceived','guestLogonSta
                 'desktopEntryWaitSeconds','powerOnAccepted','powerOnCompleted','legacyMainOnly','legacyDisplayOnly',
                 'systemEntryConfirmed','desktopDisplayReady','guestLoginRsaNegotiated','guestLoginEncryption',
                 'guestLoginAttempts','guestLoginStages','guestLockPolicySent','guestLockPolicyFlags',
-                'guestUserMode','guestAgentVersion','guestLockDisconnectReply')
+                'guestUserMode','guestAgentVersion','guestLockDisconnectReply','errorMessage','attempt','maxAttempts')
+
+def env_int(name,default,low,high):
+    try:return max(low,min(high,int(os.environ.get(name,default))))
+    except ValueError:return default
 
 def entered_system(value):
     return bool(value.get('systemEntryConfirmed') and value.get('desktopFrameReceived')
@@ -81,6 +85,9 @@ class Console:
         with self.lock:
             self.sequence+=1;self.events.append({'id':self.sequence,'at':now(),'message':message,'level':level})
             self.events=self.events[-120:]
+        # 同步写 stderr，Docker 下可用 docker compose logs 查看；消息已是脱敏后的固定文案。
+        try:print('['+now()+'] ['+level+'] '+message,file=sys.stderr,flush=True)
+        except (UnicodeError,OSError):pass  # 日志输出失败不能影响连接流程
 
     def history(self):
         values=[]
@@ -196,7 +203,7 @@ class Console:
             labels={'401':'会话已失效，请重新登录。','30001004':'账号或密码验证失败，请检查本地配置。',
                     '10002034':'需要选择企业账号，请填写企业用户名后再登录。'}
             message=labels.get(code,'操作未完成：'+type(exc).__name__+(('（业务码 '+code+'）') if code else ''))
-            if isinstance(exc,p.ProtocolError) and not isinstance(exc,p.BusinessError):message=str(exc)[:150]
+            if isinstance(exc,p.ProtocolError) and not isinstance(exc,p.BusinessError):message=str(exc)[:300]
             if action=='devices' and client is not None:
                 if code=='401':client.state['authRequired']=True
                 p.save_json(self.session_file,client.state)
@@ -216,6 +223,33 @@ class Console:
                    'success' if status=='success' else 'info')
 
     def connect(self,power_on=False):
+        """连接一次；瞬时失败时按 CLOUDPC_CONNECT_RETRIES 自动重试（默认 2 次，0 表示不重试）。"""
+        retries=env_int('CLOUDPC_CONNECT_RETRIES',2,0,5)
+        delay=env_int('CLOUDPC_CONNECT_RETRY_DELAY',15,1,120)
+        attempts=retries+1
+        for attempt in range(1,attempts+1):
+            result,returncode=self.connect_once(power_on)
+            if result:
+                result['attempt']=attempt;result['maxAttempts']=attempts
+                self.last_result=safe_result(result)
+            if not (returncode or not result or not result.get('success') or not entered_system(result)):
+                if attempt>1:self.event('第 '+str(attempt)+' 次尝试连接成功。','success')
+                self.event('Windows 登录及桌面画面已确认，已保持 '+str(result.get('controlHoldSeconds',self.hold))+' 秒并完成断开上报。','success')
+                return
+            reason=p.connection_failure_message(result)
+            if attempt>=attempts or self.stopping or not p.is_retryable_failure(result):
+                suffix='（已尝试 '+str(attempt)+' 次）' if attempt>1 else ''
+                raise p.ProtocolError('连接未完成'+suffix+'：'+reason)
+            wait=delay*attempt
+            self.event('第 '+str(attempt)+'/'+str(attempts)+' 次连接失败：'+reason+'；'+str(wait)+' 秒后重试。','error')
+            # 开机已被受理时重试不再重复发送开机请求。
+            if result and result.get('powerOnAccepted'):power_on=False
+            for _ in range(wait):
+                if self.stopping:break
+                time.sleep(1)
+
+    def connect_once(self,power_on=False):
+        """启动一次 connect_once.py 子进程，返回 (最终结果或 None, 退出码)。"""
         cmd=[sys.executable,'-X','utf8',str(PROTOCOL/'connect_once.py'),'--config',str(self.config_file),'--session',str(self.session_file),
              '--hold-seconds',str(self.hold)]
         if power_on:cmd.append('--power-on')
@@ -227,7 +261,11 @@ class Console:
                 'session/machineConnect':'桌面连接上报请求已返回。'}
         for line in proc.stdout:
             try:value=json.loads(line)
-            except (ValueError,TypeError):continue
+            except (ValueError,TypeError):
+                # 子进程的阶段/错误日志（非 JSON 行）转发到服务日志，便于排查失败阶段。
+                if line.strip():print('[子进程] '+line.strip()[:300],file=sys.stderr,flush=True)
+                continue
+            if not isinstance(value,dict):continue
             if value.get('stage')=='connect-once':result=value
             elif value.get('stage')=='session-recovery':
                 if value.get('status') in ('started','success'):self.recovery_event(value['status'])
@@ -236,10 +274,7 @@ class Console:
                 if path in labels:self.event(labels[path])
                 # HTTP status only describes transport; wait for decoded final result.
         proc.wait()
-        if result:self.last_result=safe_result(result)
-        if proc.returncode or not result or not result.get('success') or not entered_system(result):
-            raise p.ProtocolError('连接未完成：'+p.connection_failure_message(result))
-        self.event('Windows 登录及桌面画面已确认，已保持 '+str(result.get('controlHoldSeconds',self.hold))+' 秒并完成断开上报。','success')
+        return result,proc.returncode
 
     def set_loop(self,enabled):
         with self.lock:

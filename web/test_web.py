@@ -108,6 +108,57 @@ class WebChecks(unittest.TestCase):
         self.assertTrue(self.console.last_result['sessionRecovered'])
         self.assertTrue(any('密码续登成功' in e['message'] for e in self.console.events))
 
+    def spawn_results(self,results):
+        """按顺序为每次连接尝试提供一个子进程结果；None 表示子进程没有产出结果。"""
+        procs=[]
+        for value in results:
+            proc=Mock();proc.stdout=iter([json.dumps(value)] if value else []);proc.returncode=0 if value and value.get('success') else 1
+            procs.append(proc)
+        return patch.object(w.subprocess,'Popen',side_effect=procs)
+
+    GOOD={'stage':'connect-once','success':True,'desktopSessionEntered':True,'systemEntryConfirmed':True,
+          'desktopFrameReceived':True,'guestSessionEntered':True,'guestLogonState':1}
+    TRANSIENT={'stage':'connect-once','success':False,'errorType':'ProtocolError','failedStage':'desktop_channel',
+               'errorMessage':'ICE 接收帧数超过实验限制'}
+
+    def test_transient_failure_retries_then_succeeds(self):
+        with patch.object(w.time,'sleep'),self.spawn_results([self.TRANSIENT,self.GOOD]) as spawn:
+            self.console.connect()
+        self.assertEqual(spawn.call_count,2)
+        self.assertEqual(self.console.last_result['attempt'],2)
+        self.assertTrue(any('第 1/3 次连接失败' in e['message'] and 'ICE 接收帧数' in e['message'] for e in self.console.events))
+
+    def test_retries_are_bounded_and_final_error_has_reason(self):
+        with patch.dict(w.os.environ,{'CLOUDPC_CONNECT_RETRIES':'1'}),patch.object(w.time,'sleep'),\
+             self.spawn_results([self.TRANSIENT,self.TRANSIENT,self.GOOD]) as spawn:
+            with self.assertRaises(w.p.ProtocolError) as ctx:self.console.connect()
+        self.assertEqual(spawn.call_count,2)
+        self.assertIn('已尝试 2 次',str(ctx.exception));self.assertIn('desktop_channel',str(ctx.exception))
+
+    def test_zero_retries_and_unsafe_failures_do_not_retry(self):
+        with patch.dict(w.os.environ,{'CLOUDPC_CONNECT_RETRIES':'0'}),self.spawn_results([self.TRANSIENT]) as spawn:
+            with self.assertRaises(w.p.ProtocolError):self.console.connect()
+        spawn.assert_called_once()
+        unsafe=(dict(self.TRANSIENT,guestLoginSent=True,guestLogonState=0),   # 已提交凭据但未登录成功
+                dict(self.TRANSIENT,errorType='BusinessError',errorCode='30002060'),
+                dict(self.TRANSIENT,authenticationRequired=True),
+                dict(self.TRANSIENT,diagnosticCode='ICE_PIN_MISMATCH'),
+                dict(self.TRANSIENT,cleanupErrorType='BusinessError'))
+        for result in unsafe:
+            with self.subTest(result=result),self.spawn_results([result,self.GOOD]) as spawn:
+                with self.assertRaises(w.p.ProtocolError):self.console.connect()
+                spawn.assert_called_once()
+
+    def test_crashed_subprocess_is_retried(self):
+        with patch.object(w.time,'sleep'),self.spawn_results([None,self.GOOD]) as spawn:
+            self.console.connect()
+        self.assertEqual(spawn.call_count,2)
+
+    def test_error_message_is_shown_in_hint_without_raw_exceptions(self):
+        result=w.safe_result(dict(self.TRANSIENT,rawError='PASSWORD_PRIVATE'))
+        self.assertIn('ICE 接收帧数超过实验限制',result['errorHint']);self.assertIn('desktop_channel',result['errorHint'])
+        self.assertNotIn('PRIVATE',json.dumps(result))
+
     def test_devices_auth_failure_persists_without_sending_sms(self):
         client=Mock();client.config=w.p.load_json(self.root/'account.local.json')
         client.state={'accessTicket':'TICKET_PRIVATE','authRequired':True}

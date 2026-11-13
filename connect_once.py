@@ -1,10 +1,14 @@
 """One real ZTE ICE connection with fresh parameters and connected CEM reports."""
-import argparse,json,pathlib,sys,datetime as dt,time
+import argparse,json,pathlib,sys,datetime as dt,time,traceback
 import requests
 import cloudpc_protocol as p
 import zte_connection as z
 import zte_gateway_probe as g
 from live_validate import LocalAuditTransport,timestamp
+
+def log(message):
+    # 普通文本日志写 stderr；网页服务会把非 JSON 行转发到容器日志，且不影响结果解析。
+    print('[connect-once] '+dt.datetime.now().strftime('%H:%M:%S')+' '+message,file=sys.stderr,flush=True)
 
 def main():
     ap=argparse.ArgumentParser(description=__doc__)
@@ -24,25 +28,30 @@ def main():
     client=p.Client(p.load_json(p.HERE/'sample-profile.json'),config,state,
                     transport=LocalAuditTransport(directory),audit_dir=directory)
     phase='session_prepare'
+    def at(name):
+        # 记录当前阶段；失败时 failedStage 即最后进入的阶段。
+        nonlocal phase
+        phase=name;log('阶段: '+name)
+    log('开始连接，结果目录 '+directory.name)
     try:
         devices=client.prepare_session(client.devices, on_recovery=lambda status:
             print(json.dumps({'stage':'session-recovery','status':status}),flush=True))
         p.save_json(args.session,client.state)
         result['ticketRefreshAccepted']=True
         if client.state.get('pendingConnectId'):
-            phase='pending_disconnect'
+            at('pending_disconnect')
             client.session_status(client.state['pendingConnectId'],False)
             client.state.pop('pendingConnectId')
-        phase='target_selection'
+        at('target_selection')
         matches=[m for m in devices['body']['machineList'] if m.get('machineId')==config['target'].get('machineId')]
         if len(matches)!=1 or matches[0].get('originCompanyCode')!='ZTE':
             raise p.ProtocolError('仅支持本人配置的唯一 ZTE 桌面')
         machine=matches[0]
         p.save_json(directory/'devices.local.json',devices)
-        phase='snapshot_before';p.save_json(directory/'before.local.json',client.snapshot(config['target']))
+        at('snapshot_before');p.save_json(directory/'before.local.json',client.snapshot(config['target']))
         if machine.get('machineStatus')=='shutdown':
             if not args.power_on:raise p.ConnectionError('DESKTOP_POWER_ON_REQUIRED')
-            phase='power_on';client.power_on(machine);result['powerOnAccepted']=True
+            at('power_on');client.power_on(machine);result['powerOnAccepted']=True
             print(json.dumps({'stage':'power-on','status':'accepted'}),flush=True)
             for _ in range(24):
                 time.sleep(5)
@@ -53,8 +62,8 @@ def main():
                 if machine.get('machineStatus')=='available':break
             else:raise p.ProtocolError('等待开机超时')
             result['powerOnCompleted']=True
-        phase='session_registration';client.record_device();client.session_status()
-        phase='connection_parameters'
+        at('session_registration');client.record_device();client.session_status()
+        at('connection_parameters')
         value=z.fetch_parameters(machine,directory/'parameters')
         if result.get('powerOnCompleted'):
             for attempt in range(3):
@@ -63,9 +72,9 @@ def main():
                 delay=max(5,min(30,delay)) if isinstance(delay,int) else 25
                 time.sleep(delay)
                 value=z.fetch_parameters(machine,directory/('parameters-wait-'+str(attempt)))
-        phase='parameter_decode'
+        at('parameter_decode')
         options=g.connection_options(machine,value)
-        phase='ice_pin_check'
+        at('ice_pin_check')
         pin_file=p.DATA_DIR/'live/zte-ice-pin.local.json'
         if not pin_file.exists():
             raise p.ConnectionError('ICE_PIN_MISSING')
@@ -76,15 +85,25 @@ def main():
             client.session_status(connect_id,True)
             result['connectedReportAccepted']=True
             print('桌面画面及 Windows 登录已确认，在线连接上报已接受。',flush=True)
-        phase='desktop_channel'
+        at('desktop_channel')
         result.update(g.run_gateway(machine,options,directory/'desktop',
                                    on_connected=connected,hold_seconds=args.hold_seconds,pin=pin))
         result['stage']='connect-once'
         result['success']=bool(result.get('systemEntryConfirmed') and result.get('desktopFrameReceived') and result.get('guestSessionEntered') and result.get('guestLogonState')==1 and result.get('controlSessionCompleted') and result.get('connectedReportAccepted'))
         if not result['success']:result['failedStage']=phase
         if str(result.get('errorCode'))=='401':client.state['authRequired']=True
-    except (p.ProtocolError,requests.RequestException,OSError,ValueError,KeyError) as exc:
+    except Exception as exc:
+        # 兜底捕获所有异常，保证无论哪种失败都会写出 result.local.json，且带错误类型和阶段。
         result.update(errorType=getattr(exc,'error_type',type(exc).__name__),failedStage=phase)
+        if isinstance(exc,p.ProtocolError):
+            # 协议层异常文案是代码内固定文本（业务异常只含标签和业务码），可以安全记录。
+            result['errorMessage']=str(exc)[:200]
+        elif isinstance(exc,OSError) and exc.errno is not None:
+            result['errorMessage']='系统/网络错误 errno=%s'%exc.errno
+        # 完整堆栈只写入本地文件，不进入网页结果白名单。
+        try:(directory/'error.local.log').write_text(traceback.format_exc(),encoding='utf-8')
+        except OSError:pass
+        log('失败: 类型=%s 阶段=%s 说明=%s'%(result['errorType'],phase,result.get('errorMessage','无')))
         if isinstance(exc,(p.ConnectionError,p.AuthenticationRequired)):result['diagnosticCode']=exc.diagnostic_code
         if isinstance(exc,(p.BusinessError,p.AuthenticationRequired)):
             result['errorCode']=exc.code
@@ -98,6 +117,7 @@ def main():
                 result['disconnectedReportAccepted']=True
             except p.ProtocolError as exc:
                 result.update(cleanupErrorType=type(exc).__name__,success=False)
+                log('断开上报失败: '+type(exc).__name__)
                 if isinstance(exc,p.BusinessError) and exc.code=='401':
                     client.state['authRequired']=True;result['errorCode']=exc.code
         try:p.save_json(directory/'after.local.json',client.snapshot(config['target']))
@@ -111,6 +131,7 @@ def main():
         p.save_json(directory/'result.local.json',result)
         print(json.dumps(result,ensure_ascii=False))
         print('本地结果目录: '+str(directory))
+        log('结束 success=%s'%result['success'])
     return 0 if result['success'] else 1
 
 if __name__=='__main__':sys.exit(main())

@@ -72,6 +72,8 @@ docker compose up -d --build
 
 域名或HTTPS反向代理访问：在 `.env` 中设置 `CLOUDPC_PUBLIC_ORIGINS=https://cloudpc.example.com`，多个地址用逗号分隔，不带路径或结尾斜杠。反向代理需保留浏览器的原始Host。普通IP访问无需额外配置。
 
+连接失败日志与重试：执行 `docker compose logs -f cloudpc` 可看到每次连接的阶段（`[connect-once]` 行）、错误类型、失败阶段和固定文案说明；完整堆栈只保存在数据卷内对应 `live/*-connect-once/error.local.log`，不会显示在网页。瞬时失败（通道断开、网络异常等）默认自动重试 2 次，每次间隔递增（15 秒、30 秒），可在 `.env` 中用 `CLOUDPC_CONNECT_RETRIES`（0–5，0 为不重试）和 `CLOUDPC_CONNECT_RETRY_DELAY`（1–120 秒）调整。登录失效、业务错误、证书固定不符，以及已提交来宾凭据但未登录成功的失败不会重试，避免重复提交密码导致账号被锁。
+
 从旧版本更新监听绑定和后端校验：
 
 ```sh

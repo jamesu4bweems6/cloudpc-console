@@ -11,6 +11,8 @@ services:
       CLOUDPC_DATA_DIR: /data
       CLOUDPC_PUBLIC_PORT: "${CLOUDPC_PORT:-8766}"
       CLOUDPC_PUBLIC_ORIGINS: "${CLOUDPC_PUBLIC_ORIGINS:-}"
+      CLOUDPC_CONNECT_RETRIES: "${CLOUDPC_CONNECT_RETRIES:-2}"
+      CLOUDPC_CONNECT_RETRY_DELAY: "${CLOUDPC_CONNECT_RETRY_DELAY:-15}"
     volumes:
       - cloudpc-data:/data
     read_only: true
